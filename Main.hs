@@ -30,6 +30,8 @@ import qualified Data.ByteString.Char8 as C
 import Data.Maybe (fromJust)
 import qualified Data.Map as Map
 
+--------------------------------------- Types ---------------------------------------------------
+    
 type Buffer = TBMChan ByteString
 type Channel = TMChan ByteString
 type Clients = TMVar Int
@@ -60,19 +62,17 @@ data Server = Server { port::Port
 
 type ServerState = StateT Server IO
 
-initServer::IO Server
-initServer = do
-    m <- newMVar Map.empty
-    return $ Server 2000 m
-    
+---------------------------------------- Main --------------------------------------------------
+   
 main::IO ()
 main = do
-    serv <- initServer
-    (_, s)  <- runStateT (addRadio "/bigblue" "http://radio.bigblueswing.com:8002") serv
+    m <- newMVar Map.empty
+    (_, s)  <- runStateT (addRadio "/bigblue" "http://radio.bigblueswing.com:8002") $ Server 2000 m
     (_, s') <- runStateT (addRadio "/ah" "http://ru.ah.fm:80") s
     runResourceT $ runTCPServer (serverSettings (port s') "*4") $ server s'
     return ()
     
+-- | добавляем поток в радио
 addRadio::Radio -> RadioUrl -> ServerState ()
 addRadio radio url = do
     buffer <- liftIO $ newTBMChanIO 1000
@@ -82,6 +82,8 @@ addRadio radio url = do
     let fun stMap = return $ Map.insert radio info stMap 
     liftIO $ modifyMVar_ radioState fun
      
+-- | Создаем процесс для переноса потока с буфера в канал, 
+-- | и процесс для очистки канала, для каждой радиостанции.
 buff::Buffer -> IO (TMChan ByteString)
 buff buffer = do
     chan <- newTMChanIO
@@ -89,6 +91,7 @@ buff buffer = do
     forkIO $ forever $ void . atomically $ readTMChan chan
     return chan
     
+-- | Гоним поток с буфера в канал.
 copy::TBMChan ByteString -> TMChan ByteString -> IO ()
 copy buffer chan = forever $ do
     free <- atomically $ freeSlotsTBMChan buffer
@@ -98,18 +101,18 @@ copy buffer chan = forever $ do
              Just a -> writeTMChan chan a
              Nothing -> return ()
     
+-- | Создаем сервер
 server::(Monad m, MonadResource m) => Server -> Application m
 server st ad = do
     ((req,_):headers) <- appSource ad $$ parseHeaders id
     let radio = parseRequest req
     liftIO $ print ("request"::String)
     liftIO $ print radio
-    isChannel <-  liftIO $ haveChannel radio $ radioState st
-    connection <-  liftIO $ haveConnection isChannel radio $ radioState st
+    connection <-  liftIO $ isRadioAndConnect radio $ radioState st
     liftIO $ print ("headers"::String)
     liftIO $ print headers
-    liftIO $ print $ "is channel " ++ show isChannel ++ " is first " ++ show connection
-    case (isChannel, connection) of
+    liftIO $ print $ "(radio, connection) " ++ show connection
+    case connection of
          (False, _) -> sourceList ["ICY 404 OK\r\n"] $$ appSink ad
          (True, False) -> do
              channelMVar <- liftIO $ getChannelMVar radio $ radioState st
@@ -120,7 +123,7 @@ server st ad = do
              startClient channelMVar (appSource ad) (appSink ad)
     return ()
         
--- | Когда подключается первый клиент к радиостанции, льем поток в трубу
+-- | Когда подключается первый клиент к радиостанции, создаем коннект до радиостанции.
 startClientForServer :: MVar ChannelInfo ->  ResourceT IO ()
 startClientForServer channelMVar = do
     url' <- liftIO $ url <$> readMVar channelMVar
@@ -129,10 +132,11 @@ startClientForServer channelMVar = do
         host = HTTP.host req
         path = HTTP.path req
         settings = clientSettings port host
--- | стартуем клиента до этого радио
+-- | Делаем соединение до радиостанции.
     runTCPClient settings $ clientForServer channelMVar path
     return ()
 
+-- | Парсим инфу с радиостанции, льем поток в буфер.
 clientForServer :: MVar ChannelInfo -> ByteString -> Application (ResourceT IO)
 clientForServer mv path ad = do
     liftIO $ print ("start client for server"::String)
@@ -156,6 +160,7 @@ clientForServer mv path ad = do
 
 ------------------------ client only --------------------------------------------------
  
+-- | Обрабатываем клиента, копируем канал, и берем поток оттуда.
 startClient::(Monad m, MonadIO m) => MVar ChannelInfo -> Source m ByteString -> Sink ByteString m () -> m ()
 startClient channelMVar _ sinkI = do
     let resp = concat [ "ICY 200 OK\r\n"
@@ -172,37 +177,32 @@ startClient channelMVar _ sinkI = do
     sourceTMChan dup $$ sinkI
    
 --------------------------------- internal ---------------------------------------------
--- | проверяем наличие канала
-haveChannel::Radio -> RadioState -> IO Bool
-haveChannel radio radioState = withMVar radioState (fun radio)
-   where fun key rMap = return $ Map.member key rMap 
-         
--- | есть соединение до радиостанции?
-haveConnection::Bool -> Radio -> RadioState -> IO Bool
-haveConnection isChannel radio' radioState'
-              | not isChannel = return False
-              | otherwise = do
-   ChannelInfo{..} <- fromJust <$> getChannel radio' radioState'
-   return connection
-   
+       
+-- | Проверяем наличие радиостанции с таким именем, и наличие соединения до радиостанции.
+isRadioAndConnect::Radio -> RadioState -> IO (Bool, Bool)
+isRadioAndConnect radio' radioState' = do
+    maybeChannel <- withMVar radioState' $ fun radio'
+    case maybeChannel of
+         Nothing -> return (False, False)
+         Just ChannelInfo{..} -> return (True, connection)
+    where
+         fun key rMap = case key `Map.lookup` rMap of
+                             Nothing -> return Nothing
+                             Just m -> do
+                                 result <- liftIO $ readMVar m
+                                 return $ Just result
+    
+-- | Ставим флаг соединения в ChannelInfo
 setConnection :: MVar ChannelInfo -> IO ()
 setConnection mv = modifyMVar_ mv $ \x -> return $ x { connection = True }
         
+-- | Получаем буфер 
 getBuffer :: MVar ChannelInfo -> IO Buffer
 getBuffer mv = do
     ChannelInfo{..} <- readMVar mv
     return buffer
-   
-getChannel::MonadIO m => Radio -> RadioState -> m (Maybe ChannelInfo)
-getChannel radio radioState = liftIO $ withMVar radioState (fun radio)
-   where
-     fun key rMap = let mChannel = Map.lookup key rMap
-                    in  case mChannel of
-                            Nothing -> return Nothing
-                            Just m -> do
-                                result <- liftIO $ readMVar m
-                                return $ Just result
-                                
+    
+-- | Получаем канал
 getChannelMVar::MonadIO m => Radio -> RadioState -> m (MVar ChannelInfo)
 getChannelMVar radio radioState = liftIO $ withMVar radioState (fun radio)
    where fun key rmap = return . fromJust $ Map.lookup key rmap
