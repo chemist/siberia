@@ -76,7 +76,7 @@ main = do
 -- | добавляем поток в радио
 addRadio::Radio -> RadioUrl -> ServerState ()
 addRadio radio url = do
-    buffer <- liftIO $ newTBMChanIO 1000
+    buffer <- liftIO $ newTBMChanIO 10000
     channel <- liftIO $ buff buffer
     Server{..} <- get
     info <- liftIO $ newMVar $ ChannelInfo radio url buffer channel Nothing 0 False [] Nothing
@@ -110,12 +110,12 @@ server::(Monad m, MonadResource m) => Server -> Application m
 server st ad = do
     ((req,_):headers) <- appSource ad $$ parseHeaders id
     let radio = parseRequest req
-    liftIO $ print ("request"::String)
-    liftIO $ print radio
+    say ("request"::String)
+    say radio
     connection <-  liftIO $ isRadioAndConnect radio $ radioState st
-    liftIO $ print ("headers"::String)
-    liftIO $ print headers
-    liftIO $ print $ "(radio, connection) " ++ show connection
+    say ("headers"::String)
+    say headers
+    say $ "(radio, connection) " ++ show connection
     case connection of
          (False, _) -> sourceList ["ICY 404 OK\r\n"] $$ appSink ad
          (True, False) -> do
@@ -143,22 +143,25 @@ startClientForServer channelMVar = do
 -- | Парсим инфу с радиостанции, льем поток в буфер.
 clientForServer :: MVar ChannelInfo -> ByteString -> Application (ResourceT IO)
 clientForServer mv path ad = do
-    liftIO $ print ("start client for server"::String)
+    say ("start client for server"::String)
     let req = BS.concat ["GET ", path, " HTTP/1.1\r\nIcy-MetaData: 1\r\n\r\n"]
     sourceList [req] $$ appSink ad
     (l, (st,_):headers) <- appSource ad $$  zipSinks getLength $ parseHeaders id
-    liftIO $ print ("client"::String)
-    liftIO $ print l
-    liftIO $ print st
-    liftIO $ print headers
+    say ("client"::String)
+    say l
+    say st
+    say headers
     let metaInt = fromMaybe 0 $ do m <- lookup "icy-metaint" headers
                                    (i, _) <- C.readInt m
                                    return i
     meta'' <- appSource ad $$ parseMeta metaInt l
-    liftIO $ print meta''
+    say $ "set meta"
+    say $ head $ LB.toChunks meta''
+    liftIO $ setMeta mv $ head $ LB.toChunks meta''
+    say meta''
     buffer' <- liftIO $ getBuffer mv
     liftIO $ setConnection mv
-    liftIO $ print ("make pipe server => buffer"::String)
+    say ("make pipe server => buffer"::String)
     appSource ad $$ sinkTBMChan buffer'
     
 
@@ -168,19 +171,44 @@ clientForServer mv path ad = do
 startClient::(Monad m, MonadIO m) => MVar ChannelInfo -> Source m ByteString -> Sink ByteString m () -> m ()
 startClient channelMVar _ sinkI = do
     let resp = concat [ "ICY 200 OK\r\n"
-                          , "icy-notice1: Haskell shoucast splitter\r\n"
-                          , "icy-notice2: Good music here\r\n"
-                          , "content-type:audio/mp3\r\n"
-                          , "icy-pub:1\r\n"
-                          , "icy-metaint:8192\r\n"
-                          , "icy-br:64\r\n\r\n"
-                          ]
+                      , "icy-notice1: Haskell shoucast splitter\r\n"
+                      , "icy-notice2: Good music here\r\n"
+                      ]
+                          
+        resp1 = concat [ "content-type:audio/mp3\r\n"
+                       , "icy-pub:1\r\n"
+                       , "icy-metaint:8192\r\n"
+                       , "icy-br:64\r\n\r\n"
+                       ]
+        headerSize = BS.length resp1
     sourceList [resp] $$ sinkI
     channel <- liftIO $ channel <$> readMVar channelMVar
+    maybeMeta <- liftIO $ meta <$> readMVar channelMVar
     dup <- liftIO $ atomically $ dupTMChan channel
-    sourceTMChan dup $$ sinkI
+    say "meta here"
+    say $ maybeMeta
+    case maybeMeta of
+         Nothing -> sourceTMChan dup $$ sinkI
+         Just meta'' -> do
+             lfirst <- sourceTMChan dup $$ CB.take $ 8191 - headerSize
+             let [start] = LB.toChunks lfirst
+                 size = (+1) . truncate $ (fromIntegral . BS.length) meta'' / 16 
+                 withZerro = case compare size $ BS.length meta'' of
+                                  EQ -> meta''
+                                  GT -> BS.concat [meta'', BS.replicate (size - BS.length meta'') 0]
+                                  LT -> undefined
+                 withMeta = BS.concat [resp1, start, (BS.singleton . fromIntegral) size, withZerro]
+             say withMeta
+             say $ BS.length resp1
+             say $ BS.length start
+             say $ BS.length withMeta
+             sourceList [withMeta] $$ sinkI
+             sourceTMChan dup $$ sinkI
    
 --------------------------------------- Internal ---------------------------------------------
+    
+say::(Show a, MonadIO m) => a -> m ()
+say = liftIO . print
        
 -- | Проверяем наличие радиостанции с таким именем, и наличие соединения до радиостанции.
 isRadioAndConnect::Radio -> RadioState -> IO (Bool, Bool)
@@ -199,6 +227,10 @@ isRadioAndConnect radio' radioState' = do
 -- | Ставим флаг соединения в ChannelInfo
 setConnection :: MVar ChannelInfo -> IO ()
 setConnection mv = modifyMVar_ mv $ \x -> return $ x { connection = True }
+
+-- | Выставляем мета информацию в ChannelInfo
+setMeta::MVar ChannelInfo -> Meta -> IO ()
+setMeta mv meta'' = modifyMVar_ mv $ \x -> return $ x { meta = Just meta'' }
         
 -- | Получаем буфер 
 getBuffer :: MVar ChannelInfo -> IO Buffer
@@ -223,7 +255,8 @@ parseMeta metaInt headerLength = do
 -- | размер после запроса
 getLength::(Monad m, MonadIO m, MonadResource m) => Sink ByteString m Int
 getLength = sinkState 0 (\st input -> do
-    let (_,b) = breakSubstring "\r\n\r\n" input
+    let (a,b) = breakSubstring "\r\n\r\n" input
+    say a
     case (BS.null b, st < 3) of
         (True, True) -> return $ StateProcessing $ st + 1 
         (True, False) -> return $ StateDone Nothing 0  
