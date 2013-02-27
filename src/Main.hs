@@ -1,13 +1,14 @@
+-- | Simple shoutcast server for streaming audio broadcast.
+
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
+    
 module Main where
 
 import Prelude ()
 import BasicPrelude
 
-import Control.Monad.State
+import Control.Monad.State 
 import Control.Monad.Trans.Resource
 import Control.Concurrent hiding (yield)
 import Control.Concurrent.STM
@@ -84,6 +85,7 @@ addRadio radio url = do
      
 -- | Создаем процесс для переноса потока с буфера в канал, 
 -- | и процесс для очистки канала, для каждой радиостанции.
+-- @todo добавить пиды процессов в состояние
 buff::Buffer -> IO (TMChan ByteString)
 buff buffer = do
     chan <- newTMChanIO
@@ -100,6 +102,8 @@ copy buffer chan = forever $ do
         case slot of
              Just a -> writeTMChan chan a
              Nothing -> return ()
+             
+--------------------------------------- Server ---------------------------------------------------
     
 -- | Создаем сервер
 server::(Monad m, MonadResource m) => Server -> Application m
@@ -158,7 +162,7 @@ clientForServer mv path ad = do
     appSource ad $$ sinkTBMChan buffer'
     
 
------------------------- client only --------------------------------------------------
+--------------------------------------- Client  --------------------------------------------------
  
 -- | Обрабатываем клиента, копируем канал, и берем поток оттуда.
 startClient::(Monad m, MonadIO m) => MVar ChannelInfo -> Source m ByteString -> Sink ByteString m () -> m ()
@@ -176,7 +180,7 @@ startClient channelMVar _ sinkI = do
     dup <- liftIO $ atomically $ dupTMChan channel
     sourceTMChan dup $$ sinkI
    
---------------------------------- internal ---------------------------------------------
+--------------------------------------- Internal ---------------------------------------------
        
 -- | Проверяем наличие радиостанции с таким именем, и наличие соединения до радиостанции.
 isRadioAndConnect::Radio -> RadioState -> IO (Bool, Bool)
@@ -208,7 +212,7 @@ getChannelMVar radio radioState = liftIO $ withMVar radioState (fun radio)
    where fun key rmap = return . fromJust $ Map.lookup key rmap
  
 -- | парсим метаданные
-parseMeta::(Monad m, MonadIO m) => Int -> Int -> Sink ByteString m LB.ByteString
+parseMeta::(Monad m, MonadIO m) => Int -> Int -> Sink ByteString m LByteString
 parseMeta metaInt headerLength = do
     CB.drop (metaInt - headerLength)
     len <- CB.head 
@@ -268,7 +272,7 @@ parseHeaders front = do
   
   
 
-request, response, meta' :: LB.ByteString
+request, response, meta' :: LByteString
 request = LB.fromChunks ["GET / HTTP/1.0\r\nUser-Agent: mpg123/1.14.4\r\nHost: radio.bigblueswing.com:8002\r\nAccept: audio/mpeg, audio/x-mpeg, audio/mp3, audio/x-mp3, audio/mpeg3, audio/x-mpeg3, audio/mpg, audio/x-mpg, audio/x-mpegaudio, application/octet-stream, audio/mpegurl, audio/mpeg-url, audio/x-mpegurl, audio/x-scpls, audio/scpls, application/pls, */*\r\nIcy-MetaData: 1\r\n\r\n"]
 response = LB.fromChunks ["ICY 200 OK\r\nicy-notice1:<BR>This stream requires <a href=\"http://www.winamp.com/\">Winamp</a><BR>\r\nicy-notice2:SHOUTcast Distributed Network Audio Server/Linux v1.9.8<BR>\r\n"]
 meta' = LB.fromChunks ["ncontent-type:audio/mpeg\r\nicy-pub:1\r\nicy-metaint:8192\r\nicy-br:64\r\n\r\n"]
