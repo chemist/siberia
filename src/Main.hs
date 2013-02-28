@@ -2,6 +2,7 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE BangPatterns #-}
     
 module Main where
 
@@ -30,6 +31,7 @@ import qualified Data.ByteString.Char8 as C
 
 import Data.Maybe (fromJust)
 import qualified Data.Map as Map
+import Debug.Trace
 
 --------------------------------------- Types ---------------------------------------------------
     
@@ -76,7 +78,7 @@ main = do
 -- | добавляем поток в радио
 addRadio::Radio -> RadioUrl -> ServerState ()
 addRadio radio url = do
-    buffer <- liftIO $ newTBMChanIO 10000
+    buffer <- liftIO $ newTBMChanIO 16384
     channel <- liftIO $ buff buffer
     Server{..} <- get
     info <- liftIO $ newMVar $ ChannelInfo radio url buffer channel Nothing 0 False [] Nothing
@@ -97,11 +99,13 @@ buff buffer = do
 copy::TBMChan ByteString -> TMChan ByteString -> IO ()
 copy buffer chan = forever $ do
     free <- atomically $ freeSlotsTBMChan buffer
-    when (free > 100) $ atomically $ do
-        slot <- readTBMChan buffer
-        case slot of
-             Just a -> writeTMChan chan a
-             Nothing -> return ()
+    case free < 8192 of
+         True -> atomically $ do
+             slot <- readTBMChan buffer
+             case slot of
+                  Just a -> writeTMChan chan a
+                  Nothing -> return ()
+         False -> threadDelay 10000    
              
 --------------------------------------- Server ---------------------------------------------------
     
@@ -121,10 +125,10 @@ server st ad = do
          (True, False) -> do
              channelMVar <- liftIO $ getChannelMVar radio $ radioState st
              liftIO $ void . forkIO $ runResourceT $ startClientForServer channelMVar 
-             startClient channelMVar (appSource ad) (appSink ad)
+             startClient channelMVar (appSink ad)
          (True, True) -> do
              channelMVar <- liftIO $ getChannelMVar radio $ radioState st
-             startClient channelMVar (appSource ad) (appSink ad)
+             startClient channelMVar (appSink ad)
     return ()
         
 -- | Когда подключается первый клиент к радиостанции, создаем коннект до радиостанции.
@@ -147,20 +151,17 @@ clientForServer mv path ad = do
     let req = BS.concat ["GET ", path, " HTTP/1.1\r\nIcy-MetaData: 1\r\n\r\n"]
     sourceList [req] $$ appSink ad
     (l, (st,_):headers) <- appSource ad $$  zipSinks getLength $ parseHeaders id
-    say ("client"::String)
-    say l
-    say st
-    say headers
     let metaInt = fromMaybe 0 $ do m <- lookup "icy-metaint" headers
                                    (i, _) <- C.readInt m
                                    return i
     meta'' <- appSource ad $$ parseMeta metaInt l
     say $ "set meta"
-    say $ head $ LB.toChunks meta''
-    liftIO $ setMeta mv $ head $ LB.toChunks meta''
-    say meta''
+    say $ BS.concat $ LB.toChunks meta''
+    liftIO $ setMeta mv $ BS.concat $ LB.toChunks meta''
     buffer' <- liftIO $ getBuffer mv
     liftIO $ setConnection mv
+    say "headers from server"
+    say headers
     say ("make pipe server => buffer"::String)
     appSource ad $$ sinkTBMChan buffer'
     
@@ -168,43 +169,63 @@ clientForServer mv path ad = do
 --------------------------------------- Client  --------------------------------------------------
  
 -- | Обрабатываем клиента, копируем канал, и берем поток оттуда.
-startClient::(Monad m, MonadIO m) => MVar ChannelInfo -> Source m ByteString -> Sink ByteString m () -> m ()
-startClient channelMVar _ sinkI = do
+    
+startClient ::(Monad m, MonadIO m) => MVar ChannelInfo -> Sink ByteString m () -> m ()
+startClient channelMVar sinkI = do
+    connection <- liftIO $ getConnection channelMVar
+    if connection
+       then startClient' channelMVar sinkI
+       else do
+           liftIO $ threadDelay 500000
+           startClient channelMVar sinkI
+           
+startClient'::(Monad m, MonadIO m) => MVar ChannelInfo -> Sink ByteString m () -> m ()
+startClient' channelMVar sinkI = do
     let resp = concat [ "ICY 200 OK\r\n"
                       , "icy-notice1: Haskell shoucast splitter\r\n"
                       , "icy-notice2: Good music here\r\n"
                       ]
                           
-        resp1 = concat [ "content-type:audio/mp3\r\n"
-                       , "icy-pub:1\r\n"
-                       , "icy-metaint:8192\r\n"
-                       , "icy-br:64\r\n\r\n"
+        resp1 = concat [ "content-type: audio/mpeg\r\n"
+                       , "icy-name: Good music for avery one \r\n"
+                       , "icy-url: http://localhost:2000/bigblue \r\n"
+                       , "icy-genre: Swing  Big Band  Jazz  Blues\r\n"
+                       , "icy-pub: 1\r\n"
+                       , "icy-metaint: 8192\r\n"
+                       , "icy-br: 64\r\n\r\n"
                        ]
-        headerSize = BS.length resp1
     sourceList [resp] $$ sinkI
+    sourceList [resp1] $$ sinkI
     channel <- liftIO $ channel <$> readMVar channelMVar
-    maybeMeta <- liftIO $ meta <$> readMVar channelMVar
+    !maybeMeta <- liftIO $ meta <$> readMVar channelMVar
     dup <- liftIO $ atomically $ dupTMChan channel
     say "meta here"
     say $ maybeMeta
     case maybeMeta of
          Nothing -> sourceTMChan dup $$ sinkI
          Just meta'' -> do
-             lfirst <- sourceTMChan dup $$ CB.take $ 8191 - headerSize
-             let [start] = LB.toChunks lfirst
-                 size = (+1) . truncate $ (fromIntegral . BS.length) meta'' / 16 
-                 withZerro = case compare size $ BS.length meta'' of
-                                  EQ -> meta''
-                                  GT -> BS.concat [meta'', BS.replicate (size - BS.length meta'') 0]
+             let size = truncate $ (fromIntegral . BS.length) meta'' / 16 
+                 metaInfo = case compare (16 * size) $ BS.length meta'' of
+                                  EQ -> trace "EQ" BS.concat [(BS.singleton . fromIntegral) size, meta'']
+                                  GT -> trace "GT" BS.concat [(BS.singleton . fromIntegral) (size + 1), meta'', BS.replicate (16 * (1 + size) - BS.length meta'') 0]
                                   LT -> undefined
-                 withMeta = BS.concat [resp1, start, (BS.singleton . fromIntegral) size, withZerro]
-             say withMeta
-             say $ BS.length resp1
-             say $ BS.length start
-             say $ BS.length withMeta
-             sourceList [withMeta] $$ sinkI
-             sourceTMChan dup $$ sinkI
-   
+             say "meta info"
+             say metaInfo
+             say $ BS.length metaInfo
+             sourceTMChan dup $= addMeta metaInfo 8192  $$ sinkI
+             
+addMeta::Monad m => ByteString -> Int -> Conduit ByteString m ByteString
+addMeta h n = conduitState (0, 0) push close
+  where push (st, len) input 
+           | st == 0 = 
+              if BS.length input > n - len
+                   then trace "insert meta" return $ StateProducing (1, 0) [BS.concat [one, h, two]]
+                   else return $ StateProducing (0, len + BS.length input) [input]
+           | otherwise = return $ StateProducing (1, 0) [input] 
+              where (one, two) = BS.splitAt (n - len) input
+           
+        close state = return []
+        
 --------------------------------------- Internal ---------------------------------------------
     
 say::(Show a, MonadIO m) => a -> m ()
@@ -234,9 +255,11 @@ setMeta mv meta'' = modifyMVar_ mv $ \x -> return $ x { meta = Just meta'' }
         
 -- | Получаем буфер 
 getBuffer :: MVar ChannelInfo -> IO Buffer
-getBuffer mv = do
-    ChannelInfo{..} <- readMVar mv
-    return buffer
+getBuffer mv = buffer <$> readMVar mv
+    
+-- | Есть или нет соединение до радиостанции
+getConnection :: MVar ChannelInfo -> IO Bool
+getConnection mv = connection <$> readMVar mv
     
 -- | Получаем канал
 getChannelMVar::MonadIO m => Radio -> RadioState -> m (MVar ChannelInfo)
@@ -254,14 +277,15 @@ parseMeta metaInt headerLength = do
     
 -- | размер после запроса
 getLength::(Monad m, MonadIO m, MonadResource m) => Sink ByteString m Int
-getLength = sinkState 0 (\st input -> do
-    let (a,b) = breakSubstring "\r\n\r\n" input
-    say a
-    case (BS.null b, st < 3) of
-        (True, True) -> return $ StateProcessing $ st + 1 
-        (True, False) -> return $ StateDone Nothing 0  
-        (False, _) -> return $ StateDone Nothing $ BS.length b -4)
-                        return
+getLength = sinkState 0 push close
+    where
+       push st input = do
+          let (_,b) = breakSubstring "\r\n\r\n" input
+          case (BS.null b, st < 3) of
+              (True, True) -> return $ StateProcessing $ st + 1 
+              (True, False) -> return $ StateDone Nothing 0  
+              (False, _) -> return $ StateDone Nothing $ BS.length b -4
+       close = return 
 
 charLF, charCR, charSpace, charColon :: Word8
 charLF = 10
