@@ -43,6 +43,7 @@ type Headers = [(ByteString, ByteString)]
 type Meta = ByteString
 type Radio = ByteString
 type RadioUrl = ByteString
+type MetaInt = Int
                  
 data ChannelInfo = ChannelInfo { radio::Radio
                                , url  ::RadioUrl
@@ -214,17 +215,25 @@ startClient' channelMVar sinkI = do
              say $ BS.length metaInfo
              sourceTMChan dup $= addMeta metaInfo 8192  $$ sinkI
              
-addMeta::Monad m => ByteString -> Int -> Conduit ByteString m ByteString
-addMeta h n = conduitState (0, 0) push close
-  where push (st, len) input 
-           | st == 0 = 
-              if BS.length input > n - len
-                   then trace "insert meta" return $ StateProducing (1, 0) [BS.concat [one, h, two]]
-                   else return $ StateProducing (0, len + BS.length input) [input]
-           | otherwise = return $ StateProducing (1, 0) [input] 
-              where (one, two) = BS.splitAt (n - len) input
-           
-        close state = return []
+addMeta::(Monad m, MonadIO m) => Meta -> MetaInt -> Conduit ByteString m ByteString
+addMeta input position = loop input position (0, 0)
+    where
+      loop ::(Monad m, MonadIO m) =>  ByteString -> Int -> (Int, Int) -> Conduit ByteString m ByteString
+      loop meta metaInt (st, len) = do
+          chunk <- await
+          case (chunk, st) of
+               (Nothing, _) -> return ()
+               (Just chunk', 0) -> do
+                   let (one, two) = BS.splitAt (metaInt -len) chunk'
+                   if BS.length chunk' > metaInt - len
+                      then do yield $ one ++ input ++ two 
+                              loop meta metaInt (1, 0)
+                      else do yield chunk'
+                              loop meta metaInt (0, len + BS.length chunk')
+               (Just chunk', _) -> do
+                   yield chunk'
+                   loop meta metaInt (1, 0)
+                   
         
 --------------------------------------- Internal ---------------------------------------------
     
@@ -274,18 +283,20 @@ parseMeta metaInt headerLength = do
     let toInt = fromIntegral . fromJust
         len' = 16 * toInt len
     CB.take len'
-    
+ 
 -- | размер после запроса
 getLength::(Monad m, MonadIO m, MonadResource m) => Sink ByteString m Int
-getLength = sinkState 0 push close
-    where
-       push st input = do
-          let (_,b) = breakSubstring "\r\n\r\n" input
-          case (BS.null b, st < 3) of
-              (True, True) -> return $ StateProcessing $ st + 1 
-              (True, False) -> return $ StateDone Nothing 0  
-              (False, _) -> return $ StateDone Nothing $ BS.length b -4
-       close = return 
+getLength = loop (0::Int)
+  where
+    loop st = do
+        chunk <- await 
+        let (_, stream) = breakSubstring "\r\n\r\n" $ fromJust chunk
+        case (isJust chunk, st < 3) of
+             (False, _) -> return 0
+             (True, True) -> if BS.null stream 
+                                       then loop $ st + 1
+                                       else return $ BS.length stream - 4
+             (True, False ) ->  return 0
 
 charLF, charCR, charSpace, charColon :: Word8
 charLF = 10
@@ -327,6 +338,8 @@ parseHeaders front = do
            header <- parseHeader line
            parseHeaders $ front . (header:)
   
+
+------ testing ----
   
 
 request, response, meta' :: LByteString
@@ -337,3 +350,21 @@ meta' = LB.fromChunks ["ncontent-type:audio/mpeg\r\nicy-pub:1\r\nicy-metaint:819
 -- http://radio.bigblueswing.com:8002/
     
 -- http://ru.ah.fm/
+    
+
+sink :: Sink ByteString IO ()
+sink = do
+        mstr <- await
+        case mstr of
+           Nothing -> return ()
+           Just str -> do
+               liftIO $ BS.putStrLn str
+               sink
+               
+testS ::ByteString
+testS = "asdfgghjklasdfasdfas\r\n\r\ndfasdfasdfasdfasdfaasdf"
+
+m::ByteString
+m = "AAA"
+
+
