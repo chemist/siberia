@@ -6,8 +6,8 @@
     
 module Main where
 
-import Prelude ()
-import BasicPrelude
+import Prelude (show, Show(..))
+import BasicPrelude hiding (show, Show(..))
 
 import Control.Monad.State 
 import Control.Monad.Trans.Resource
@@ -32,6 +32,7 @@ import qualified Data.ByteString.Char8 as C
 import Data.Maybe (fromJust)
 import qualified Data.Map as Map
 import Debug.Trace
+import Data.Text (unpack)
 
 --------------------------------------- Types ---------------------------------------------------
     
@@ -54,7 +55,11 @@ data ChannelInfo = ChannelInfo { radio::Radio
                                , connection :: Bool
                                , headers::Headers
                                , meta::Maybe Meta
+                               , headerLength :: Int
                                }
+                               
+instance Show ChannelInfo where
+    show ChannelInfo{..} = show radio ++ " " ++ show url ++ " " ++ show clients ++ " " ++ show connection 
 
 type RadioState = MVar (Map Radio (MVar ChannelInfo))
 
@@ -82,7 +87,7 @@ addRadio radio url = do
     buffer <- liftIO $ newTBMChanIO 16384
     channel <- liftIO $ buff buffer
     Server{..} <- get
-    info <- liftIO $ newMVar $ ChannelInfo radio url buffer channel Nothing 0 False [] Nothing
+    info <- liftIO $ newMVar $ ChannelInfo radio url buffer channel Nothing 0 False [] Nothing 0
     let fun stMap = return $ Map.insert radio info stMap 
     liftIO $ modifyMVar_ radioState fun
      
@@ -100,13 +105,10 @@ buff buffer = do
 copy::TBMChan ByteString -> TMChan ByteString -> IO ()
 copy buffer chan = forever $ do
     free <- atomically $ freeSlotsTBMChan buffer
-    case free < 8192 of
-         True -> atomically $ do
-             slot <- readTBMChan buffer
-             case slot of
-                  Just a -> writeTMChan chan a
-                  Nothing -> return ()
-         False -> threadDelay 10000    
+    slot <- atomically $ readTBMChan buffer
+    case slot of
+         Just a -> atomically $ writeTMChan chan a
+         Nothing -> threadDelay 10000
              
 --------------------------------------- Server ---------------------------------------------------
     
@@ -151,20 +153,14 @@ clientForServer mv path ad = do
     say ("start client for server"::String)
     let req = BS.concat ["GET ", path, " HTTP/1.1\r\nIcy-MetaData: 1\r\n\r\n"]
     sourceList [req] $$ appSink ad
-    (l, (st,_):headers) <- appSource ad $$  zipSinks getLength $ parseHeaders id
-    let metaInt = fromMaybe 0 $ do m <- lookup "icy-metaint" headers
-                                   (i, _) <- C.readInt m
-                                   return i
-    meta'' <- appSource ad $$ parseMeta metaInt l
-    say $ "set meta"
-    say $ BS.concat $ LB.toChunks meta''
-    liftIO $ setMeta mv $ BS.concat $ LB.toChunks meta''
-    buffer' <- liftIO $ getBuffer mv
-    liftIO $ setConnection mv
+    (st,_):headers' <- appSource ad $= getHeaderLength mv $$  parseHeaders id
+    !_ <- setHeaders mv headers'
+    !buffer' <- liftIO $ getBuffer mv
+    !_ <- setConnection mv
     say "headers from server"
-    say headers
+    say headers'
     say ("make pipe server => buffer"::String)
-    appSource ad $$ sinkTBMChan buffer'
+    appSource ad $$ parseMeta mv =$ sinkTBMChan buffer'
     
 
 --------------------------------------- Client  --------------------------------------------------
@@ -197,23 +193,23 @@ startClient' channelMVar sinkI = do
                        ]
     sourceList [resp] $$ sinkI
     sourceList [resp1] $$ sinkI
-    channel <- liftIO $ channel <$> readMVar channelMVar
+    !channel <- liftIO $ channel <$> readMVar channelMVar
     !maybeMeta <- liftIO $ meta <$> readMVar channelMVar
-    dup <- liftIO $ atomically $ dupTMChan channel
-    say "meta here"
-    say $ maybeMeta
+    !dup <- liftIO $ atomically $ dupTMChan channel
     case maybeMeta of
          Nothing -> sourceTMChan dup $$ sinkI
          Just meta'' -> do
              let size = truncate $ (fromIntegral . BS.length) meta'' / 16 
                  metaInfo = case compare (16 * size) $ BS.length meta'' of
-                                  EQ -> trace "EQ" BS.concat [(BS.singleton . fromIntegral) size, meta'']
-                                  GT -> trace "GT" BS.concat [(BS.singleton . fromIntegral) (size + 1), meta'', BS.replicate (16 * (1 + size) - BS.length meta'') 0]
+                                  EQ -> BS.concat [(BS.singleton . fromIntegral) size, meta'']
+                                  GT -> BS.concat [(BS.singleton . fromIntegral) (size + 1), meta'', BS.replicate (16 * (1 + size) - BS.length meta'') 0]
                                   LT -> undefined
              say "meta info"
              say metaInfo
              say $ BS.length metaInfo
-             sourceTMChan dup $= addMeta metaInfo 8192  $$ sinkI
+             a <- liftIO $ readMVar channelMVar
+             say a
+             sourceTMChan dup $= addMeta metaInfo 8192 $$ sinkI
              
 addMeta::(Monad m, MonadIO m) => Meta -> MetaInt -> Conduit ByteString m ByteString
 addMeta input position = loop input position (0, 0)
@@ -222,7 +218,7 @@ addMeta input position = loop input position (0, 0)
       loop meta metaInt (st, len) = do
           chunk <- await
           case (chunk, st) of
-               (Nothing, _) -> return ()
+               (Nothing, _) -> trace "nothing" return ()
                (Just chunk', 0) -> do
                    let (one, two) = BS.splitAt (metaInt -len) chunk'
                    if BS.length chunk' > metaInt - len
@@ -231,7 +227,7 @@ addMeta input position = loop input position (0, 0)
                       else do yield chunk'
                               loop meta metaInt (0, len + BS.length chunk')
                (Just chunk', _) -> do
-                   yield chunk'
+                   yield chunk' 
                    loop meta metaInt (1, 0)
                    
         
@@ -255,12 +251,16 @@ isRadioAndConnect radio' radioState' = do
                                  return $ Just result
     
 -- | Ставим флаг соединения в ChannelInfo
-setConnection :: MVar ChannelInfo -> IO ()
-setConnection mv = modifyMVar_ mv $ \x -> return $ x { connection = True }
+setConnection :: (Monad m, Functor m, MonadIO m) => MVar ChannelInfo -> m ()
+setConnection mv = void . liftIO $ forkIO $ do
+    threadDelay 500000
+    modifyMVar_ mv $ \x -> return $ x { connection = True }
 
 -- | Выставляем мета информацию в ChannelInfo
 setMeta::MVar ChannelInfo -> Meta -> IO ()
-setMeta mv meta'' = modifyMVar_ mv $ \x -> return $ x { meta = Just meta'' }
+setMeta mv meta'' = do
+    !_ <- modifyMVar_ mv $ \x -> return $ x { meta = Just meta'' }
+    return ()
         
 -- | Получаем буфер 
 getBuffer :: MVar ChannelInfo -> IO Buffer
@@ -276,14 +276,66 @@ getChannelMVar radio radioState = liftIO $ withMVar radioState (fun radio)
    where fun key rmap = return . fromJust $ Map.lookup key rmap
  
 -- | парсим метаданные
-parseMeta::(Monad m, MonadIO m) => Int -> Int -> Sink ByteString m LByteString
-parseMeta metaInt headerLength = do
-    CB.drop (metaInt - headerLength)
-    len <- CB.head 
-    let toInt = fromIntegral . fromJust
-        len' = 16 * toInt len
-    CB.take len'
+parseMeta::(Monad m, MonadIO m) => MVar ChannelInfo -> Conduit ByteString m ByteString
+parseMeta mv = do
+    channel <- liftIO $ readMVar mv
+    let headers' = headers channel
+    say headers'
+    let metaInt = fromMaybe 0 $ do m <- lookup "icy-metaint" headers'
+                                   (i, _) <- C.readInt m
+                                   return i
+    let headerLength' =  headerLength channel
+    say headerLength'
+    loop (0::Int, metaInt - headerLength')
+    where 
+      loop (1, _) = do
+          chunk <- await
+          case chunk of
+               Nothing -> return ()
+               Just chunk' -> do
+                   yield chunk'
+                   loop (1, 0)
+      loop (0, st) = do
+          chunk <- await
+          case chunk of 
+               Nothing -> return ()
+               Just chunk' -> if st > BS.length chunk' 
+                                then loop (0, st - BS.length chunk')
+                                else do
+                                    let (h, t) = BS.splitAt st chunk'
+                                        len' = 1 + 16 * (fromIntegral . BS.head) t
+                                        (m, l) = BS.splitAt len' t
+                                    say "parse meta"
+                                    say  $ BS.tail m
+                                    liftIO $ setMeta mv $ BS.tail m
+                                    yield $ BS.concat [h, l]
+                                    loop (1, 0)
+                   
  
+getHeaderLength::(Monad m, MonadIO m, MonadResource m) => MVar ChannelInfo -> Conduit ByteString m ByteString
+getHeaderLength info = loop (0::Int)
+  where 
+    loop st = do
+        chunk <- await
+        let (_, stream) = breakSubstring "\r\n\r\n" $ fromJust chunk
+        case (isJust chunk, st < 3) of
+             (False, _) -> return ()
+             (True, False) -> yield $ fromJust chunk
+             (True, True) -> if BS.null stream
+                    then do
+                        yield $ fromJust chunk
+                        loop $ st + 1
+                    else do !_ <- setHeaderLength info $ BS.length stream - 4
+                            yield $ fromJust chunk
+                            loop 3
+                            
+setHeaderLength::(Monad m, MonadIO m) => MVar ChannelInfo -> Int -> m ()
+setHeaderLength mv hl = liftIO $ modifyMVar_ mv $ \x -> return $ x { headerLength = hl }
+
+getHeaderLengthM mv = headerLength <$> readMVar mv
+
+setHeaders mv headers' = liftIO $ modifyMVar_ mv $ \x -> return $ x { headers = headers' }
+
 -- | размер после запроса
 getLength::(Monad m, MonadIO m, MonadResource m) => Sink ByteString m Int
 getLength = loop (0::Int)
@@ -362,7 +414,7 @@ sink = do
                sink
                
 testS ::ByteString
-testS = "asdfgghjklasdfasdfas\r\n\r\ndfasdfasdfasdfasdfaasdf"
+testS = "qwertyuiopasdfghjklzxcvbnm"
 
 m::ByteString
 m = "AAA"
