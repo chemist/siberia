@@ -96,20 +96,10 @@ addRadio radio url = do
 -- @todo добавить пиды процессов в состояние
 buff::Buffer -> IO (TMChan ByteString)
 buff buffer = do
-    chan <- newTMChanIO
-    forkIO $ copy buffer chan
-    forkIO $ forever $ void . atomically $ readTMChan chan
+    chan <- newBroadcastTMChanIO
+    forkIO $ runResourceT $ sourceTBMChan buffer $$ sinkTMChan chan
     return chan
     
--- | Гоним поток с буфера в канал.
-copy::TBMChan ByteString -> TMChan ByteString -> IO ()
-copy buffer chan = forever $ do
-    free <- atomically $ freeSlotsTBMChan buffer
-    slot <- atomically $ readTBMChan buffer
-    case slot of
-         Just a -> atomically $ writeTMChan chan a
-         Nothing -> threadDelay 10000
-             
 --------------------------------------- Server ---------------------------------------------------
     
 -- | Создаем сервер
@@ -160,8 +150,32 @@ clientForServer mv path ad = do
     say "headers from server"
     say headers'
     say ("make pipe server => buffer"::String)
-    appSource ad $$ parseMeta mv =$ sinkTBMChan buffer'
+    appSource ad $= makeCh =$= parseMeta mv $$ sinkTBMChan buffer'
+
+makeCh :: (Monad m, MonadIO m) => Conduit ByteString m ByteString
+makeCh = loop BS.empty
+  where 
+    loop end = do
+        buf <- await
+        case buf of 
+             Nothing -> yield end >> return ()
+             Just buf' -> do
+                 let bufSize = BS.length buf'
+                     endSize = BS.length end
+                 if bufSize + endSize >= 4096
+                    then do
+                        let (first, second) = BS.splitAt (4096 - endSize) buf'
+                        yield $ BS.concat [end, first]
+                        loop second
+                    else loop $ BS.concat [end, buf']
     
+
+size:: (Monad m, MonadIO m) => Conduit ByteString m ByteString
+size = do
+    buf <- await
+    case buf of
+         Just buf' -> trace (show $ BS.length buf') yield buf' >> size
+         Nothing -> return ()
 
 --------------------------------------- Client  --------------------------------------------------
  
@@ -199,10 +213,10 @@ startClient' channelMVar sinkI = do
     case maybeMeta of
          Nothing -> sourceTMChan dup $$ sinkI
          Just meta'' -> do
-             let size = truncate $ (fromIntegral . BS.length) meta'' / 16 
-                 metaInfo = case compare (16 * size) $ BS.length meta'' of
-                                  EQ -> BS.concat [(BS.singleton . fromIntegral) size, meta'']
-                                  GT -> BS.concat [(BS.singleton . fromIntegral) (size + 1), meta'', BS.replicate (16 * (1 + size) - BS.length meta'') 0]
+             let size' = truncate $ (fromIntegral . BS.length) meta'' / 16 
+                 metaInfo = case compare (16 * size') $ BS.length meta'' of
+                                  EQ -> BS.concat [(BS.singleton . fromIntegral) size', meta'']
+                                  GT -> BS.concat [(BS.singleton . fromIntegral) (size' + 1), meta'', BS.replicate (16 * (1 + size') - BS.length meta'') 0]
                                   LT -> undefined
              say "meta info"
              say metaInfo
@@ -410,7 +424,7 @@ sink = do
         case mstr of
            Nothing -> return ()
            Just str -> do
-               liftIO $ BS.putStrLn str
+               liftIO $ C.putStrLn str
                sink
                
 testS ::ByteString
