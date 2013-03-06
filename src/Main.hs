@@ -7,6 +7,8 @@
 module Main where
 
 import BasicPrelude 
+import Prelude ()
+import qualified Prelude as Prelude
 
 import Control.Concurrent hiding (yield)
 
@@ -27,6 +29,7 @@ import Network.Socket
 import Data.Word (Word8)
 import Control.Applicative
 import Data.Attoparsec.RFC2616
+import Data.Typeable (typeOf)
 
 
     
@@ -92,16 +95,17 @@ makeRadioStation = do
 big::RadioInfo
 big = RI (RadioId "/big") (Url "http://radio.bigblueswing.com:8002") Nothing [] Nothing
 
+showType = Prelude.show . typeOf
+
 connectHandler::(InputStream ByteString, OutputStream ByteString) -> Radio -> IO ()
 connectHandler (inputS, outputS) radio = do
     sized <- S.throwIfProducesMoreThan 2048 inputS
     result <- try $ S.parseFromStream request sized ::IO (Either SomeException (Request, Headers))
     either badRequest goodRequest result
     where
-        badRequest s = do
-            print "bad request"
-            print s
-            S.write (Just "ICY 400 Bad Request\r\n") outputS
+        badRequest s | showType s == "TooManyBytesReadException" = S.write (Just "ICY 414 Request-URI Too Long\r\n") outputS
+                     | otherwise                                = S.write (Just "ICY 400 Bad Request\r\n") outputS
+                     
         goodRequest (request, headers) = do
             idInBase <- (RadioId $ requestUri request) `member` radio
             if idInBase 
