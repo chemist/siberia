@@ -85,7 +85,11 @@ instance SettingsById Radio where
     chanG (Radio radio) rid = do
         chan <- getter (return . channel) (Radio radio) rid 
         case chan of
-             Nothing -> makeClient (Radio radio) rid
+             Nothing -> do
+                 Just chan' <- makeClient (Radio radio) rid
+                 chanS chan' (Radio radio) rid
+                 dup <- dupChan chan'
+                 return $ Just dup
              Just chan' -> do
                  dup <- dupChan chan'
                  return $ Just dup
@@ -141,16 +145,15 @@ connectHandler (inputS, outputS) radio = do
             idInBase <- (RadioId $ requestUri request') `member` radio
             if idInBase 
                then do
-                   radioStreamInput <- getConnect radio (RadioId $ requestUri request') 
-                   S.connect radioStreamInput outputS
+                   !chan <- chanG radio (RadioId $ requestUri request')
+                   threadDelay 1000000
                    print request'
                    print headers
                    start <- S.fromByteString successRespo
-                   let fun file = do
-                       S.supply start outputS
-                       S.connect file outputS
-                   S.withFileAsInput "music.mp3" fun
-                   
+                   input <- S.chanToInput (fromJust chan)
+                   S.supply start outputS
+                   S.connect input outputS
+                   return ()
                else do
                    -- | unknown radio id
                    print request'
@@ -167,6 +170,7 @@ makeClient radio rid = do
     devNull <- S.nullOutput
     forkIO $ S.connect radioStreamInput  chanStreamOutput
     forkIO $ S.connect chanStreamInput devNull
+    -- | @TODO save pid
     return $ Just chan
                    
 getConnect::Radio -> RadioId -> IO (InputStream ByteString)
