@@ -11,6 +11,7 @@ import Prelude ()
 import qualified Prelude as Prelude
 
 import Control.Concurrent hiding (yield)
+import Control.Concurrent.Chan
 
 import Data.ByteString (breakSubstring, split, spanEnd, breakByte)
 import qualified Data.ByteString as BS
@@ -24,12 +25,17 @@ import Data.Text (unpack)
 
 import System.IO.Streams as S
 import System.IO.Streams.Attoparsec as S
+import System.IO.Streams.Concurrent as S
 import Network.Socket 
+import Network.URI
 
 import Data.Word (Word8)
 import Control.Applicative
 import Data.Attoparsec.RFC2616
+import Data.Attoparsec (parseOnly)
 import Data.Typeable (typeOf)
+import Control.Monad.Fix (fix)
+
 
 
     
@@ -46,31 +52,55 @@ data RadioInfo = RI { rid :: RadioId
                     , pid :: Maybe ThreadId
                     , headers :: Headers
                     , meta    :: Maybe Meta
-                    } deriving (Show, Ord, Eq)
+                    , channel ::Maybe (Chan (Maybe ByteString))
+                    } deriving (Eq)
 
 newtype Radio = Radio (MVar (Map RadioId (MVar RadioInfo)))
 
 class SettingsById a where
     member   :: RadioId -> a -> IO Bool
+    info     :: RadioId -> a -> IO (MVar RadioInfo)
     urlG     :: a -> RadioId -> IO Url
-    urlS     :: a -> RadioId -> Url -> IO ()
+    urlS     :: Url -> a -> RadioId -> IO ()
     pidG     :: a -> RadioId -> IO (Maybe ThreadId)
-    pidS     :: a -> RadioId -> Maybe ThreadId -> IO ()
+    pidS     :: Maybe ThreadId -> a -> RadioId -> IO ()
     headersG :: a -> RadioId -> IO Headers
-    headersS :: a -> RadioId -> Headers -> IO ()
+    headersS :: Headers -> a -> RadioId -> IO ()
     metaG    :: a -> RadioId -> IO (Maybe Meta)
-    metaS    :: a -> RadioId -> Maybe Meta -> IO ()
+    metaS    :: Maybe Meta -> a -> RadioId -> IO ()
+    chanG    :: a -> RadioId -> IO (Maybe (Chan (Maybe ByteString)))
+    chanS    :: Chan (Maybe ByteString) -> a -> RadioId -> IO ()
     
 instance SettingsById Radio where
     member rid (Radio radio) = withMVar radio $ \x -> return $ rid `Map.member` x
-    urlG = undefined
-    urlS = undefined
-    pidG = undefined
-    pidS = undefined
-    headersG = undefined
-    headersS = undefined
-    metaG = undefined
-    metaS = undefined
+    info rid (Radio radio) = withMVar radio $ \x -> return $ fromJust $ Map.lookup rid x
+    urlG =  getter $ return . url
+    urlS u = setter $ \x -> return $ x { url = u } 
+    pidG = getter $ return . pid
+    pidS p = setter $ \x -> return $ x { pid = p }
+    headersG = getter $ return . headers
+    headersS h = setter $ \x -> return $ x { headers = h }
+    metaG = getter $ return . meta
+    metaS m = setter $ \x -> return $ x { meta = m }
+    chanG (Radio radio) rid = do
+        chan <- getter (return . channel) (Radio radio) rid 
+        case chan of
+             Nothing -> makeClient (Radio radio) rid
+             Just chan' -> do
+                 dup <- dupChan chan'
+                 return $ Just dup
+    chanS chan = setter $ \x -> return $ x { channel = Just chan }
+        
+getter:: (RadioInfo -> IO b) -> Radio -> RadioId -> IO b
+getter f radio rid = do
+    infoM <- info rid radio
+    withMVar infoM f
+    
+setter:: (RadioInfo -> IO RadioInfo) -> Radio -> RadioId -> IO ()
+setter f radio rid = do
+    infoM <- info rid radio
+    modifyMVar_ infoM f
+        
 
 main::IO ()
 main = do
@@ -88,12 +118,12 @@ main = do
     
 makeRadioStation ::IO Radio
 makeRadioStation = do
-    info <- newMVar big
-    r <- newMVar $ Map.singleton (RadioId "/big") info
+    inf <- newMVar big
+    r <- newMVar $ Map.singleton (RadioId "/big") inf
     return $ Radio r
 
 big::RadioInfo
-big = RI (RadioId "/big") (Url "http://radio.bigblueswing.com:8002") Nothing [] Nothing
+big = RI (RadioId "/big") (Url "http://radio.bigblueswing.com:8002") Nothing [] Nothing Nothing
 
 showType :: SomeException -> String
 showType = Prelude.show . typeOf
@@ -111,6 +141,10 @@ connectHandler (inputS, outputS) radio = do
             idInBase <- (RadioId $ requestUri request') `member` radio
             if idInBase 
                then do
+                   radioStreamInput <- getConnect radio (RadioId $ requestUri request') 
+                   S.connect radioStreamInput outputS
+                   print request'
+                   print headers
                    start <- S.fromByteString successRespo
                    let fun file = do
                        S.supply start outputS
@@ -122,7 +156,53 @@ connectHandler (inputS, outputS) radio = do
                    print request'
                    print headers
                    S.write (Just "ICY 404 Not Found\r\n") outputS
+                   
+
+makeClient::Radio -> RadioId -> IO (Maybe (Chan (Maybe ByteString)))
+makeClient radio rid = do
+    radioStreamInput <- getConnect radio rid
+    chan <- newChan 
+    chanStreamOutput <- S.chanToOutput chan
+    chanStreamInput  <- S.chanToInput  chan
+    devNull <- S.nullOutput
+    forkIO $ S.connect radioStreamInput  chanStreamOutput
+    forkIO $ S.connect chanStreamInput devNull
+    return $ Just chan
+                   
+getConnect::Radio -> RadioId -> IO (InputStream ByteString)
+getConnect radio rid = do
+    url <- urlG radio rid
+    (i, o) <- openConnection url
+    getStream <- S.fromByteString "GET / HTTP/1.0\r\nIcy-MetaData: 1\r\n\r\n"
+    S.connect getStream o
+    result <- S.parseFromStream response i
+    print result
+    return i
+                   
+
+openConnection :: Url -> IO (InputStream ByteString, OutputStream ByteString)
+openConnection (Url url) = do
+        let Right (hb, pb) = parseOnly parseUrl url
+            h = C.unpack hb
+            p = C.unpack pb
+        is <- getAddrInfo (Just hints) (Just h) (Just p)
+        let addr = head is
+        let a = addrAddress addr
+        s <- socket (addrFamily addr) Stream defaultProtocol
+        Network.Socket.connect s a
+        (i,o) <- S.socketToStreams s
+        return (i, o) 
+        where
+           hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
     
+testUrl :: ByteString
+testUrl = "http://bigblueswing.com:2002"
+
+testUrl1 :: ByteString
+testUrl1 = "http://bigblueswing.com"
+                   
+testUrl2 :: ByteString
+testUrl2 = "http://bigblueswing.com:2002/asdf"
 
 successRespo :: ByteString
 successRespo = BS.concat [ "ICY 200 OK\r\n"
