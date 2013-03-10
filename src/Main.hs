@@ -135,7 +135,7 @@ instance Api Radio where
            then return False
            else do
                mv <- newMVar  radioInfo
-               modifyMVar_ x $ \mi -> return $ Map.insert (rid radioInfo) mv mi
+               modifyMVar_ x $ \mi -> return $ Map.insert (addSlash $ rid radioInfo) mv mi
                return True
     rmStream (Radio x) rid' = do
        is <- rid' `member` Radio x
@@ -144,6 +144,9 @@ instance Api Radio where
               modifyMVar_ x $ \mi -> return $ Map.delete rid' mi
               return True
           else return False
+
+addSlash::RadioId -> RadioId
+addSlash (RadioId x) = RadioId $ BS.concat ["/", x]
 
         
         
@@ -161,7 +164,7 @@ setter f radio rid = do
 main::IO ()
 main = do
     stations <- makeRadioStation
-    liftIO $ web stations
+    forkIO $ web stations
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1
     bindSocket sock (SockAddrInet (toEnum port) 0)
