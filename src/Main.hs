@@ -130,7 +130,8 @@ main = do
 
 
 web::Radio -> IO ()
-web radio = quickHttpServe $ Sn.dir "static" (Sn.serveDirectory "./static")
+web radio = quickHttpServe $ do
+    Sn.ifTop (Sn.serveFile "static/index.html") <|> Sn.dir "static" (Sn.serveDirectory "./static")
 
 
 
