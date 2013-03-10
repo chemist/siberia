@@ -29,7 +29,7 @@
             <table class="table table-striped streams">
                 <thead>
                 <tr>
-                    <th width="40px">ID</th>
+                    <th width="80px">ID</th>
                     <th>URL</th>
                     <th></th>
                 </tr>
@@ -39,7 +39,9 @@
                     <td>{{ stream.id }}</td>
                     <td>{{ stream.url }}</td>
                     <td class="streams-action">
-                        <button class="btn btn-danger btn-small"><i class="icon-remove-sign icon-white"></i> delete</button>
+                        <button class="btn btn-danger btn-small" data-ng-click="remove(stream)">
+                            <i class="icon-remove-sign icon-white"></i> delete
+                        </button>
                     </td>
                 </tr>
                 </tbody>
@@ -51,19 +53,23 @@
                 <fieldset>
                     <legend>Add Stream</legend>
                     <div class="control-group">
+                        <label class="control-label" for="inputId">Stream ID</label>
+                        <div class="controls">
+                            <input type="text" data-ng-model="stream.id" id="inputId" placeholder="ID" required="">
+                        </div>
+                    </div>
+                    <div class="control-group">
                         <label class="control-label" for="inputUrl">Stream Url</label>
                         <div class="controls">
                             <input type="url" data-ng-model="stream.url" id="inputUrl" placeholder="Url">
                         </div>
                     </div>
                     <div class="control-group">
-                        <label class="control-label" for="inputId">Stream Shortname</label>
                         <div class="controls">
-                            <input type="text" data-ng-model="stream.id" id="inputId" placeholder="ID" required="">
-                        </div>
-                    </div>
-                    <div class="control-group">
-                        <div class="controls">
+                            <p class="error" data-ng-switch on="error" data-ng-show="error">
+                                <span data-ng-switch-when="409">Stream already exists.</span>
+                                <span data-ng-switch-default>An error occurred while processing your request. Please try again later.</span>
+                            </p>
                             <button type="submit" class="btn">Add</button>
                         </div>
                     </div>

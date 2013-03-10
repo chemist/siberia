@@ -14,6 +14,12 @@ admin.factory('Stream', function($resource){
 admin.controller('ListCtrl', function($scope, Stream){
     $scope.searchText = '';
     $scope.streams = Stream.query();
+
+    $scope.remove = function(stream) {
+        stream.$delete(function(){
+            $scope.streams = Stream.query();
+        });
+    };
 });
 
 admin.controller('AddCtrl', function($scope, Stream, $location){
@@ -22,11 +28,16 @@ admin.controller('AddCtrl', function($scope, Stream, $location){
         url: 'http://ru.ah.fm/'
     };
 
+    $scope.$watch('stream', function(){
+        $scope.error = null;
+    }, true);
+
     $scope.add = function() {
-        Stream.remove($scope.stream);
-        /*Stream.save($scope.stream, function(){
+        Stream.save($scope.stream, function(){
             $location.path('/streams');
-        });*/
+        }, function(http){
+            $scope.error = http.status;
+        });
     };
 });
 
