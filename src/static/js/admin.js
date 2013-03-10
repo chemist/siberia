@@ -23,7 +23,10 @@ admin.controller('ListCtrl', function($scope, Stream){
 });
 
 admin.controller('AddCtrl', function($scope, Stream, $location){
-    $scope.stream = {};
+    $scope.stream = {
+        id: 'pianorama',
+        url: 'http://pianorama.outself.ru/'
+    };
 
     $scope.$watch('stream', function(){
         $scope.error = null;
