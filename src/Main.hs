@@ -29,30 +29,27 @@ import System.IO.Streams.Concurrent as S
 import Network.Socket 
 import Network.URI
 
+import qualified Snap.Core as Sn
+import qualified Snap.Util.FileServe as Sn
+import Snap.Core (Snap, Method(..))
+import Snap.Http.Server
+import Snap.Http.Server.Config
+
 import Data.Word (Word8)
 import Control.Applicative
 import Data.Attoparsec.RFC2616
 import Data.Attoparsec (parseOnly)
 import Data.Typeable (typeOf)
 
-import Snap.Http.Server
-import Snap.Http.Server.Config
-import qualified Snap.Core as Sn
-import qualified Snap.Util.FileServe as Sn
 
-
-
-
-
-
-    
-port :: Int
-port = 2000
 
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
 newtype Meta = Meta (ByteString, Int) deriving (Show, Ord, Eq)
 type Headers = [Header]
+
+port :: Int
+port = 2000
 
 data RadioInfo = RI { rid :: RadioId
                     , url :: Url
@@ -130,8 +127,30 @@ main = do
 
 
 web::Radio -> IO ()
-web radio = quickHttpServe $ do
-    Sn.ifTop (Sn.serveFile "static/index.html") <|> Sn.dir "static" (Sn.serveDirectory "./static")
+web radio = quickHttpServe $ Sn.ifTop (Sn.serveFile "static/index.html") <|> 
+                             Sn.route [ ("server/stats", statsHandler radio)
+                                      , ("stream/:sid", streamHandler radio)
+                                      , ("stream/:sid/metadata", streamMetaHandler radio)
+                                      ] <|>
+                             Sn.dir "static" (Sn.serveDirectory "./static")
+
+
+statsHandler radio = do
+    Sn.method GET $ Sn.writeText "stats"
+    Sn.method DELETE $ Sn.writeText "stats"
+
+streamHandler::Radio -> Snap ()
+streamHandler radio = Sn.method Sn.GET $ do
+    param <- Sn.getParam "sid"
+    maybe justGetStream withParam param
+    where
+      justGetStream :: Snap ()
+      justGetStream = Sn.writeText "clean param"
+      withParam sid = do
+          Sn.writeBS sid
+          Sn.writeText "with param"
+
+streamMetaHandler = undefined
 
 
 
