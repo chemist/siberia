@@ -8,12 +8,19 @@
     overflow: hidden;
 }
 
-.streams-head input {
+.streams-head .side {
     position: absolute;
     bottom: 0;
     right: 0;
+    overflow: hidden;
 }
 
-p.error {
-    color: #a00;
+.streams-head .side input,
+.streams-head .side a {
+    display: block;
+    float: left;
+}
+
+.streams-head .side a {
+    padding: 6px 15px 6px 25px;
 }

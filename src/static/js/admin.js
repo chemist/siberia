@@ -23,10 +23,7 @@ admin.controller('ListCtrl', function($scope, Stream){
 });
 
 admin.controller('AddCtrl', function($scope, Stream, $location){
-    $scope.stream = {
-        id: 'ru-ah-fm',
-        url: 'http://ru.ah.fm/'
-    };
+    $scope.stream = {};
 
     $scope.$watch('stream', function(){
         $scope.error = null;

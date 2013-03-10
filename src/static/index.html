@@ -23,23 +23,19 @@
         <script type="text/ng-template" id="/streams.html">
             <div class="streams-head">
                 <h1>Streams</h1>
-                <input placeholder="search" data-ng-model="searchText" type="search" />
+                <div class="side">
+                    <input placeholder="search" data-ng-model="searchText" type="search" />
+                    <a href="#/streams/add">add stream</a>
+                </div>
             </div>
-            <p><a href="#/streams/add">add stream</a></p>
             <table class="table table-striped streams">
-                <thead>
-                <tr>
-                    <th width="80px">ID</th>
-                    <th>URL</th>
-                    <th></th>
-                </tr>
-                </thead>
                 <tbody>
                 <tr data-ng-repeat="stream in streams | filter:searchText">
-                    <td>{{ stream.id }}</td>
-                    <td>{{ stream.url }}</td>
+                    <td>{{ stream.url }}
+                        <p class="muted">{{ stream.id }}</p>
+                    </td>
                     <td class="streams-action">
-                        <button class="btn btn-danger btn-small" data-ng-click="remove(stream)">
+                        <button class="btn btn-danger" data-ng-click="remove(stream)">
                             <i class="icon-remove-sign icon-white"></i> delete
                         </button>
                     </td>
@@ -66,7 +62,7 @@
                     </div>
                     <div class="control-group">
                         <div class="controls">
-                            <p class="error" data-ng-switch on="error" data-ng-show="error">
+                            <p class="text-error" data-ng-switch on="error" data-ng-show="error">
                                 <span data-ng-switch-when="409">Stream already exists.</span>
                                 <span data-ng-switch-default>An error occurred while processing your request. Please try again later.</span>
                             </p>
