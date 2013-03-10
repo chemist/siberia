@@ -83,6 +83,7 @@ newtype Radio = Radio (MVar (Map RadioId (MVar RadioInfo)))
 class SettingsById a where
     member   :: RadioId -> a -> IO Bool
     allStream:: a -> IO [RadioInfo]
+    addStream:: a -> RadioInfo -> IO Bool
     info     :: RadioId -> a -> IO (MVar RadioInfo)
     urlG     :: a -> RadioId -> IO Url
     urlS     :: Url -> a -> RadioId -> IO ()
@@ -124,6 +125,14 @@ instance SettingsById Radio where
         where 
           fromMVar :: Map RadioId (MVar RadioInfo) -> IO [RadioInfo]
           fromMVar y = Prelude.mapM (\(i, mv) -> withMVar mv return) $ Map.toList y
+    addStream (Radio x) radioInfo = do
+        is <- (rid radioInfo) `member` (Radio x)
+        if is 
+           then return False
+           else do
+               mv <- newMVar $ radioInfo
+               modifyMVar_ x $ \mi -> return $ Map.insert (rid radioInfo) mv mi
+               return True
         
         
 getter:: (RadioInfo -> IO b) -> Radio -> RadioId -> IO b
@@ -155,22 +164,33 @@ main = do
 
 web::Radio -> IO ()
 web radio = quickHttpServe $ Sn.ifTop (Sn.serveFile "static/index.html") <|> 
-                             Sn.route [ ("server/stats", statsHandler radio)
-                                      , ("stream", streamHandler radio)
-                                      , ("stream/:sid", streamHandlerById radio)
-                                      , ("stream/:sid/metadata", streamMetaHandler radio)
-                                      ] <|>
+                             Sn.method GET ( Sn.route [ ("server/stats", statsHandler radio)
+                                                      , ("stream", getStreamHandler radio)
+                                                      , ("stream/:sid", streamHandlerById radio)
+                                                      , ("stream/:sid/metadata", streamMetaHandler radio)
+                                                      ]) <|>
+                             Sn.method PUT ( Sn.route [ ("stream", putStreamHandler radio) ] ) <|>
                              Sn.dir "static" (Sn.serveDirectory "./static")
 
 
-statsHandler radio = do
-    Sn.method GET $ Sn.writeText "stats"
-    Sn.method DELETE $ Sn.writeText "stats"
+statsHandler radio = Sn.writeText "stats"
 
-streamHandler ::Radio -> Snap ()
-streamHandler radio = do
-    s <- liftIO $ allStream radio
-    Sn.writeLBS $ encode s
+getStreamHandler ::Radio -> Snap ()
+getStreamHandler radio = Sn.method GET $ do
+        s <- liftIO $ allStream radio
+        Sn.writeLBS $ encode s
+
+putStreamHandler radio = Sn.method PUT $ do
+        info <- decode <$> Sn.readRequestBody 1024  :: Snap (Maybe RadioInfo)
+        case info of
+             Nothing -> Sn.finishWith $ Sn.setResponseCode 400 Sn.emptyResponse
+             Just i -> do
+                 result <- liftIO $ addStream radio i
+                 if result 
+                    then Sn.writeLBS $ encode i
+                    else Sn.finishWith $ Sn.setResponseCode 409 Sn.emptyResponse
+    
+
 
 streamHandlerById::Radio -> Snap ()
 streamHandlerById radio = Sn.method Sn.GET $ do
