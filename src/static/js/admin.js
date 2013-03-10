@@ -16,16 +16,17 @@ admin.controller('ListCtrl', function($scope, Stream){
     $scope.streams = Stream.query();
 });
 
-admin.controller('AddCtrl', function($scope, Stream){
+admin.controller('AddCtrl', function($scope, Stream, $location){
     $scope.stream = {
         id: 'ru-ah-fm',
         url: 'http://ru.ah.fm/'
     };
 
     $scope.add = function() {
-        Stream.save($scope.stream, function(){
-            console.log(arguments);
-        });
+        Stream.remove($scope.stream);
+        /*Stream.save($scope.stream, function(){
+            $location.path('/streams');
+        });*/
     };
 });
 
