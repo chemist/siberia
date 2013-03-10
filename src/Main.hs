@@ -82,8 +82,6 @@ newtype Radio = Radio (MVar (Map RadioId (MVar RadioInfo)))
 
 class SettingsById a where
     member   :: RadioId -> a -> IO Bool
-    allStream:: a -> IO [RadioInfo]
-    addStream:: a -> RadioInfo -> IO Bool
     info     :: RadioId -> a -> IO (MVar RadioInfo)
     urlG     :: a -> RadioId -> IO Url
     urlS     :: Url -> a -> RadioId -> IO ()
@@ -95,6 +93,12 @@ class SettingsById a where
     metaS    :: Maybe Meta -> a -> RadioId -> IO ()
     chanG    :: a -> RadioId -> IO (Maybe (Chan (Maybe ByteString)))
     chanS    :: Chan (Maybe ByteString) -> a -> RadioId -> IO ()
+
+class Api a where
+    allStream:: a -> IO [RadioInfo]
+    addStream:: a -> RadioInfo -> IO Bool
+    rmStream :: a -> rid -> IO Bool
+
     
 instance SettingsById Radio where
     member rid (Radio radio) = withMVar radio $ \x -> return $ rid `Map.member` x
@@ -119,20 +123,26 @@ instance SettingsById Radio where
                  dup <- dupChan chan'
                  return $ Just dup
     chanS chan = setter $ \x -> return $ x { channel = Just chan }
-    allStream (Radio x) = do
-        m <- withMVar x $ fromMVar
-        return m
+
+instance Api Radio where
+    allStream (Radio x) = withMVar x fromMVar
         where 
           fromMVar :: Map RadioId (MVar RadioInfo) -> IO [RadioInfo]
           fromMVar y = Prelude.mapM (\(i, mv) -> withMVar mv return) $ Map.toList y
     addStream (Radio x) radioInfo = do
-        is <- (rid radioInfo) `member` (Radio x)
+        is <- rid radioInfo `member` Radio x
         if is 
            then return False
            else do
-               mv <- newMVar $ radioInfo
+               mv <- newMVar  radioInfo
                modifyMVar_ x $ \mi -> return $ Map.insert (rid radioInfo) mv mi
                return True
+    rmStream (Radio x) rid = do
+       is <- rid `member` Radio x
+       if is
+          then return True
+          else return False
+
         
         
 getter:: (RadioInfo -> IO b) -> Radio -> RadioId -> IO b
@@ -169,7 +179,7 @@ web radio = quickHttpServe $ Sn.ifTop (Sn.serveFile "static/index.html") <|>
                                                       , ("stream/:sid", streamHandlerById radio)
                                                       , ("stream/:sid/metadata", streamMetaHandler radio)
                                                       ]) <|>
-                             Sn.method PUT ( Sn.route [ ("stream", putStreamHandler radio) ] ) <|>
+                             Sn.method POST ( Sn.route [ ("stream/:sid", postStreamHandler radio) ] ) <|>
                              Sn.dir "static" (Sn.serveDirectory "./static")
 
 
@@ -180,7 +190,7 @@ getStreamHandler radio = Sn.method GET $ do
         s <- liftIO $ allStream radio
         Sn.writeLBS $ encode s
 
-putStreamHandler radio = Sn.method PUT $ do
+postStreamHandler radio = Sn.method POST $ do
         info <- decode <$> Sn.readRequestBody 1024  :: Snap (Maybe RadioInfo)
         case info of
              Nothing -> Sn.finishWith $ Sn.setResponseCode 400 Sn.emptyResponse
