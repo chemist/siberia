@@ -9,39 +9,72 @@
         <div class="navbar">
             <div class="navbar-inner">
                 <div class="container">
-                <a class="brand" href="#">Siberia Streaming</a>
+                <a class="brand" href="/" target="_self">Siberia Streaming</a>
                 <ul class="nav">
-                    <li><a href="#">Streams</a></li>
-                    <li><a href="#">Server Status</a></li>
+                    <li><a href="#/streams">Streams</a></li>
+                    <li><a href="#/status">Server Status</a></li>
                 </ul>
                 </div>
             </div>
         </div>
 
-        <div class="container" data-ng-controller="StreamsCtrl">
+        <div data-ng-view="" class="container"></div>
+
+        <script type="text/ng-template" id="/streams.html">
             <div class="streams-head">
                 <h1>Streams</h1>
                 <input placeholder="search" data-ng-model="searchText" type="search" />
             </div>
+            <p><a href="#/streams/add">add stream</a></p>
             <table class="table table-striped streams">
                 <thead>
-                    <tr>
-                        <th width="40px">ID</th>
-                        <th>URL</th>
-                        <th></th>
-                    </tr>
+                <tr>
+                    <th width="40px">ID</th>
+                    <th>URL</th>
+                    <th></th>
+                </tr>
                 </thead>
                 <tbody>
-                    <tr data-ng-repeat="stream in streams | filter:searchText">
-                        <td>{{ stream.id }}</td>
-                        <td>{{ stream.url }}</td>
-                        <td class="streams-action">
-                            <button class="btn btn-danger btn-small"><i class="icon-remove-sign icon-white"></i> delete</button>
-                        </td>
-                    </tr>
+                <tr data-ng-repeat="stream in streams | filter:searchText">
+                    <td>{{ stream.id }}</td>
+                    <td>{{ stream.url }}</td>
+                    <td class="streams-action">
+                        <button class="btn btn-danger btn-small"><i class="icon-remove-sign icon-white"></i> delete</button>
+                    </td>
+                </tr>
                 </tbody>
             </table>
-        </div>
+        </script>
+
+        <script type="text/ng-template" id="/streams-add.html">
+            <form class="form-horizontal" ng-submit="add()">
+                <fieldset>
+                    <legend>Add Stream</legend>
+                    <div class="control-group">
+                        <label class="control-label" for="inputUrl">Stream Url</label>
+                        <div class="controls">
+                            <input type="url" data-ng-model="stream.url" id="inputUrl" placeholder="Url">
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label class="control-label" for="inputId">Stream Shortname</label>
+                        <div class="controls">
+                            <input type="text" data-ng-model="stream.id" id="inputId" placeholder="ID" required="">
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <div class="controls">
+                            <button type="submit" class="btn">Add</button>
+                        </div>
+                    </div>
+                </fieldset>
+            </form>
+        </script>
+
+
+        <script type="text/ng-template" id="/status.html">
+            <h1>Server Status</h1>
+        </script>
 
         <script src="/static/js/angular.js"></script>
         <script src="/static/js/angular-resource.js"></script>
