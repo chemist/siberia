@@ -68,13 +68,13 @@ data RadioInfo = RI { rid :: RadioId
                     } deriving (Eq)
 
 instance ToJSON RadioInfo where
-    toJSON x = object [ "rid" .= (toJSON . rid) x
+    toJSON x = object [ "id" .= (toJSON . rid) x
                       , "url" .= (toJSON . url) x
                       ]
 
 instance FromJSON RadioInfo where
     parseJSON (Object x) = do
-        rid <- x .: "rid"
+        rid <- x .: "id"
         url <- x .: "url"
         return $ RI (RadioId rid) (Url url) Nothing [] Nothing Nothing
 
