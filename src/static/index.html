@@ -1,11 +1,49 @@
 <!DOCTYPE html>
-<html>
+<html ng-app="admin">
     <head>
-        <title>
-            
-        </title>
+        <title>title</title>
+        <link href="/static/css/bootstrap.css" rel="stylesheet">
+        <link href="/static/css/admin.css" rel="stylesheet">
     </head>
     <body>
+        <div class="navbar">
+            <div class="navbar-inner">
+                <div class="container">
+                <a class="brand" href="#">Siberia Server</a>
+                <ul class="nav">
+                    <li><a href="#">Streams</a></li>
+                    <li><a href="#">Server Status</a></li>
+                </ul>
+                </div>
+            </div>
+        </div>
 
+        <div class="container">
+            <h1>Streams</h1>
+            <table class="table streams">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>URL</th>
+                        <th class="streams-action"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>12</td>
+                        <td>http://yandex.ru/</td>
+                        <td>
+                            <button class="btn btn-info btn-small"><i class="icon-info-sign icon-white"></i> stats</button>
+                            <button class="btn btn-danger btn-small"><i class="icon-remove-sign icon-white"></i> delete</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <script src="/static/js/angular.js"></script>
+        <script src="/static/js/angular-resource.js"></script>
+        <script src="/static/js/angular-cookies.js"></script>
+        <script src="/static/js/admin.js"></script>
     </body>
 </html>
