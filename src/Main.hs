@@ -34,7 +34,14 @@ import Control.Applicative
 import Data.Attoparsec.RFC2616
 import Data.Attoparsec (parseOnly)
 import Data.Typeable (typeOf)
-import Control.Monad.Fix (fix)
+
+import Snap.Http.Server
+import Snap.Http.Server.Config
+import qualified Snap.Core as Sn
+import qualified Snap.Util.FileServe as Sn
+
+
+
 
 
 
@@ -109,6 +116,7 @@ setter f radio rid = do
 main::IO ()
 main = do
     stations <- makeRadioStation
+    liftIO $ web stations
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1
     bindSocket sock (SockAddrInet (toEnum port) 0)
@@ -119,7 +127,13 @@ main = do
         forkIO $ connectHandler connected stations >> sClose accepted
     sClose sock
     return ()
-    
+
+
+web::Radio -> IO ()
+web radio = quickHttpServe $ Sn.dir "static" (Sn.serveDirectory "./static")
+
+
+
 makeRadioStation ::IO Radio
 makeRadioStation = do
     inf <- newMVar big
