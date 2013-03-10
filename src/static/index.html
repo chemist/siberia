@@ -1,7 +1,7 @@
 <!DOCTYPE html>
-<html ng-app="admin">
+<html data-ng-app="admin">
     <head>
-        <title>title</title>
+        <title>Siberia Streaming</title>
         <link href="/static/css/bootstrap.css" rel="stylesheet">
         <link href="/static/css/admin.css" rel="stylesheet">
     </head>
@@ -9,7 +9,7 @@
         <div class="navbar">
             <div class="navbar-inner">
                 <div class="container">
-                <a class="brand" href="#">Siberia Server</a>
+                <a class="brand" href="#">Siberia Streaming</a>
                 <ul class="nav">
                     <li><a href="#">Streams</a></li>
                     <li><a href="#">Server Status</a></li>
@@ -18,22 +18,24 @@
             </div>
         </div>
 
-        <div class="container">
-            <h1>Streams</h1>
-            <table class="table streams">
+        <div class="container" data-ng-controller="StreamsCtrl">
+            <div class="streams-head">
+                <h1>Streams</h1>
+                <input placeholder="search" data-ng-model="searchText" type="search" />
+            </div>
+            <table class="table table-striped streams">
                 <thead>
                     <tr>
-                        <th>ID</th>
+                        <th width="40px">ID</th>
                         <th>URL</th>
-                        <th class="streams-action"></th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr>
-                        <td>12</td>
-                        <td>http://yandex.ru/</td>
-                        <td>
-                            <button class="btn btn-info btn-small"><i class="icon-info-sign icon-white"></i> stats</button>
+                    <tr data-ng-repeat="stream in streams | filter:searchText">
+                        <td>{{ stream.id }}</td>
+                        <td>{{ stream.url }}</td>
+                        <td class="streams-action">
                             <button class="btn btn-danger btn-small"><i class="icon-remove-sign icon-white"></i> delete</button>
                         </td>
                     </tr>

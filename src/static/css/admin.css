@@ -1,3 +1,15 @@
 .streams-action {
+    text-align: right !important;
     width: 150px;
+}
+
+.streams-head {
+    position: relative;
+    overflow: hidden;
+}
+
+.streams-head input {
+    position: absolute;
+    bottom: 0;
+    right: 0;
 }
