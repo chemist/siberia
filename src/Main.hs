@@ -41,12 +41,20 @@ import Data.Attoparsec.RFC2616
 import Data.Attoparsec (parseOnly)
 import Data.Typeable (typeOf)
 
+import Data.Aeson
+
 
 
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
 newtype Meta = Meta (ByteString, Int) deriving (Show, Ord, Eq)
 type Headers = [Header]
+
+instance ToJSON RadioId where
+    toJSON (RadioId x) = toJSON x
+
+instance ToJSON Url where
+    toJSON (Url x) = toJSON x
 
 port :: Int
 port = 2000
@@ -58,6 +66,17 @@ data RadioInfo = RI { rid :: RadioId
                     , meta    :: Maybe Meta
                     , channel ::Maybe (Chan (Maybe ByteString))
                     } deriving (Eq)
+
+instance ToJSON RadioInfo where
+    toJSON x = object [ "rid" .= (toJSON . rid) x
+                      , "url" .= (toJSON . url) x
+                      ]
+
+instance FromJSON RadioInfo where
+    parseJSON (Object x) = do
+        rid <- x .: "rid"
+        url <- x .: "url"
+        return $ RI (RadioId rid) (Url url) Nothing [] Nothing Nothing
 
 newtype Radio = Radio (MVar (Map RadioId (MVar RadioInfo)))
 
