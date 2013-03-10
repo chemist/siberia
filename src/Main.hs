@@ -97,7 +97,7 @@ class SettingsById a where
 class Api a where
     allStream:: a -> IO [RadioInfo]
     addStream:: a -> RadioInfo -> IO Bool
-    rmStream :: a -> rid -> IO Bool
+    rmStream :: a -> RadioId -> IO Bool
 
     
 instance SettingsById Radio where
@@ -137,10 +137,12 @@ instance Api Radio where
                mv <- newMVar  radioInfo
                modifyMVar_ x $ \mi -> return $ Map.insert (rid radioInfo) mv mi
                return True
-    rmStream (Radio x) rid = do
-       is <- rid `member` Radio x
+    rmStream (Radio x) rid' = do
+       is <- rid' `member` Radio x
        if is
-          then return True
+          then do
+              modifyMVar_ x $ \mi -> return $ Map.delete rid' mi
+              return True
           else return False
 
         
@@ -178,19 +180,21 @@ web radio = quickHttpServe $ Sn.ifTop (Sn.serveFile "static/index.html") <|>
                                                       , ("stream", getStreamHandler radio)
                                                       , ("stream/:sid", streamHandlerById radio)
                                                       , ("stream/:sid/metadata", streamMetaHandler radio)
-                                                      ]) <|>
-                             Sn.method POST ( Sn.route [ ("stream/:sid", postStreamHandler radio) ] ) <|>
+                                                      ])                                                  <|>
+                             Sn.method POST ( Sn.route [ ("stream/:sid", postStreamHandler radio) ] )     <|>
+                             Sn.method DELETE ( Sn.route [ ("stream/:sid", deleteStreamHandler radio) ] ) <|>
                              Sn.dir "static" (Sn.serveDirectory "./static")
 
 
 statsHandler radio = Sn.writeText "stats"
 
 getStreamHandler ::Radio -> Snap ()
-getStreamHandler radio = Sn.method GET $ do
+getStreamHandler radio = do
         s <- liftIO $ allStream radio
         Sn.writeLBS $ encode s
 
-postStreamHandler radio = Sn.method POST $ do
+postStreamHandler::Radio -> Snap ()
+postStreamHandler radio = do
         info <- decode <$> Sn.readRequestBody 1024  :: Snap (Maybe RadioInfo)
         case info of
              Nothing -> Sn.finishWith $ Sn.setResponseCode 400 Sn.emptyResponse
@@ -199,6 +203,18 @@ postStreamHandler radio = Sn.method POST $ do
                  if result 
                     then Sn.writeLBS $ encode i
                     else Sn.finishWith $ Sn.setResponseCode 409 Sn.emptyResponse
+
+deleteStreamHandler::Radio -> Snap ()
+deleteStreamHandler radio = do
+    param <- Sn.getParam "sid"
+    maybe (Sn.finishWith $ Sn.setResponseCode 400 Sn.emptyResponse) rmSt param
+    where
+      rmSt i = do
+          result <-  liftIO $ rmStream radio (RadioId i) 
+          if result
+             then Sn.finishWith $ Sn.setResponseCode 200 Sn.emptyResponse
+             else Sn.finishWith $ Sn.setResponseCode 403 Sn.emptyResponse
+
     
 
 
