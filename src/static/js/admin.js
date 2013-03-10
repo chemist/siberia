@@ -7,13 +7,7 @@ admin.factory('Stream', function($resource){
 admin.controller('StreamsCtrl', function($scope, Stream){
     $scope.searchText = '';
 
-    $scope.streams = [
-        {id: 12, url: 'http://ru.ah.fm/'},
-        {id: 13, url: 'http://bassjunkies.com'}
-    ];
-
-    //var streams = Stream.query(function(){
-    //    console.log(streams);
-    //    $scope.streams = streams;
-    //});
+    Stream.query(function(streams){
+        $scope.streams = streams;
+    });
 });
