@@ -82,6 +82,7 @@ newtype Radio = Radio (MVar (Map RadioId (MVar RadioInfo)))
 
 class SettingsById a where
     member   :: RadioId -> a -> IO Bool
+    allStream:: a -> IO [RadioInfo]
     info     :: RadioId -> a -> IO (MVar RadioInfo)
     urlG     :: a -> RadioId -> IO Url
     urlS     :: Url -> a -> RadioId -> IO ()
@@ -117,6 +118,13 @@ instance SettingsById Radio where
                  dup <- dupChan chan'
                  return $ Just dup
     chanS chan = setter $ \x -> return $ x { channel = Just chan }
+    allStream (Radio x) = do
+        m <- withMVar x $ fromMVar
+        return m
+        where 
+          fromMVar :: Map RadioId (MVar RadioInfo) -> IO [RadioInfo]
+          fromMVar y = Prelude.mapM (\(i, mv) -> withMVar mv return) $ Map.toList y
+        
         
 getter:: (RadioInfo -> IO b) -> Radio -> RadioId -> IO b
 getter f radio rid = do
@@ -148,7 +156,8 @@ main = do
 web::Radio -> IO ()
 web radio = quickHttpServe $ Sn.ifTop (Sn.serveFile "static/index.html") <|> 
                              Sn.route [ ("server/stats", statsHandler radio)
-                                      , ("stream/:sid", streamHandler radio)
+                                      , ("stream", streamHandler radio)
+                                      , ("stream/:sid", streamHandlerById radio)
                                       , ("stream/:sid/metadata", streamMetaHandler radio)
                                       ] <|>
                              Sn.dir "static" (Sn.serveDirectory "./static")
@@ -158,8 +167,13 @@ statsHandler radio = do
     Sn.method GET $ Sn.writeText "stats"
     Sn.method DELETE $ Sn.writeText "stats"
 
-streamHandler::Radio -> Snap ()
-streamHandler radio = Sn.method Sn.GET $ do
+streamHandler ::Radio -> Snap ()
+streamHandler radio = do
+    s <- liftIO $ allStream radio
+    Sn.writeLBS $ encode s
+
+streamHandlerById::Radio -> Snap ()
+streamHandlerById radio = Sn.method Sn.GET $ do
     param <- Sn.getParam "sid"
     maybe justGetStream withParam param
     where
