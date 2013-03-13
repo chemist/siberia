@@ -26,6 +26,7 @@ import System.IO.Streams as S
 import System.IO.Streams.Attoparsec as S
 import System.IO.Streams.Concurrent as S
 import Network.Socket 
+import Network.BSD (getHostName)
 import Network.URI
 
 import qualified Snap.Core as Sn
@@ -47,6 +48,7 @@ newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
 newtype Meta = Meta (ByteString, Int) deriving (Show, Ord, Eq)
 type Headers = [Header]
+type HostPort = Maybe (HostName, Int)
 
 instance ToJSON RadioId where
     toJSON (RadioId x) = toJSON x
@@ -63,20 +65,28 @@ data RadioInfo = RI { rid :: RadioId
                     , headers :: Headers
                     , meta    :: Maybe Meta
                     , channel ::Maybe (Chan (Maybe ByteString))
+                    , hostPort :: HostPort
                     } deriving (Eq)
 
 instance ToJSON RadioInfo where
     toJSON x = object [ "id" .= (toJSON . rid) x
                       , "url" .= (toJSON . url) x
+                      , "listenUrl" .= (toJSON . BS.concat) ["http://", C.pack host, ":", toBs port, "/", (fromRid . rid) x]
                       ]
+               where 
+                 (Just (host, port)) = hostPort x
+                 toBs::Int -> ByteString
+                 toBs  = C.pack . Prelude.show 
+                 fromRid :: RadioId -> ByteString
+                 fromRid (RadioId x ) = x
 
 instance FromJSON RadioInfo where
     parseJSON (Object x) = do
         rid <- x .: "id"
         url <- x .: "url"
-        return $ RI (RadioId rid) (Url url) Nothing [] Nothing Nothing
+        return $ RI (RadioId rid) (Url url) Nothing [] Nothing Nothing Nothing
 
-newtype Radio = Radio (MVar (Map RadioId (MVar RadioInfo)))
+data Radio = Radio (MVar (Map RadioId (MVar RadioInfo))) HostPort
 
 class SettingsById a where
     member   :: RadioId -> a -> IO Bool
@@ -91,6 +101,7 @@ class SettingsById a where
     metaS    :: Maybe Meta -> a -> RadioId -> IO ()
     chanG    :: a -> RadioId -> IO (Maybe (Chan (Maybe ByteString)))
     chanS    :: Chan (Maybe ByteString) -> a -> RadioId -> IO ()
+    hostG    :: a -> RadioId -> IO HostPort
 
 class Api a where
     allStream:: a -> IO [RadioInfo]
@@ -99,8 +110,8 @@ class Api a where
 
     
 instance SettingsById Radio where
-    member rid (Radio radio) = withMVar radio $ \x -> return $ rid `Map.member` x
-    info rid (Radio radio) = withMVar radio $ \x -> return $ fromJust $ Map.lookup rid x
+    member rid (Radio radio _) = withMVar radio $ \x -> return $ rid `Map.member` x
+    info rid (Radio radio _) = withMVar radio $ \x -> return $ fromJust $ Map.lookup rid x
     urlG =  getter $ return . url
     urlS u = setter $ \x -> return $ x { url = u } 
     pidG = getter $ return . pid
@@ -109,34 +120,35 @@ instance SettingsById Radio where
     headersS h = setter $ \x -> return $ x { headers = h }
     metaG = getter $ return . meta
     metaS m = setter $ \x -> return $ x { meta = m }
-    chanG (Radio radio) rid = do
-        chan <- getter (return . channel) (Radio radio) rid 
+    chanG (Radio radio hp) rid = do
+        chan <- getter (return . channel) (Radio radio hp) rid 
         case chan of
              Nothing -> do
-                 Just chan' <- makeClient (Radio radio) rid
-                 chanS chan' (Radio radio) rid
+                 Just chan' <- makeClient (Radio radio hp) rid
+                 chanS chan' (Radio radio hp) rid
                  dup <- dupChan chan'
                  return $ Just dup
              Just chan' -> do
                  dup <- dupChan chan'
                  return $ Just dup
     chanS chan = setter $ \x -> return $ x { channel = Just chan }
+    hostG =  getter $ return . hostPort
 
 instance Api Radio where
-    allStream (Radio x) = withMVar x fromMVar
+    allStream (Radio x _) = withMVar x fromMVar
         where 
           fromMVar :: Map RadioId (MVar RadioInfo) -> IO [RadioInfo]
           fromMVar y = Prelude.mapM (\(i, mv) -> withMVar mv return) $ Map.toList y
-    addStream (Radio x) radioInfo = do
-        is <- rid radioInfo `member` Radio x
+    addStream (Radio x hp) radioInfo = do
+        is <- rid radioInfo `member` Radio x hp
         if is 
            then return False
            else do
-               mv <- newMVar  radioInfo
+               mv <- newMVar $ addHostPort hp radioInfo
                modifyMVar_ x $ \mi -> return $ Map.insert (addSlash $ rid radioInfo) mv mi
                return True
-    rmStream (Radio x) rid' = do
-       is <- rid' `member` Radio x
+    rmStream (Radio x hp) rid' = do
+       is <- rid' `member` Radio x hp
        if is
           then do
               modifyMVar_ x $ \mi -> return $ Map.delete rid' mi
@@ -146,6 +158,8 @@ instance Api Radio where
 addSlash::RadioId -> RadioId
 addSlash (RadioId x) = RadioId $ BS.concat ["/", x]
 
+addHostPort::HostPort -> RadioInfo -> RadioInfo
+addHostPort hp x = x { hostPort = hp }
         
         
 getter:: (RadioInfo -> IO b) -> Radio -> RadioId -> IO b
@@ -161,7 +175,8 @@ setter f radio rid = do
 
 main::IO ()
 main = do
-    stations <- makeRadioStation
+    host <- getHostName
+    stations <- makeRadioStation $ Just (host, 2000)
     forkIO $ web stations
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1
@@ -231,13 +246,13 @@ streamMetaHandler = undefined
 
 
 
-makeRadioStation ::IO Radio
-makeRadioStation = do
-    inf <- newMVar big
-    r <- newMVar $ Map.singleton (RadioId "/big") inf
-    return $ Radio r
+makeRadioStation ::HostPort -> IO Radio
+makeRadioStation hp = do
+    inf <- newMVar $ big hp
+    r <- newMVar $ Map.singleton (RadioId "/big") inf 
+    return $ Radio r hp
 
-big::RadioInfo
+big::HostPort -> RadioInfo
 big = RI (RadioId "/big") (Url "http://radio.bigblueswing.com:8002") Nothing [] Nothing Nothing
 
 showType :: SomeException -> String
