@@ -54,7 +54,8 @@ parseUrl = withPort <|> withoutPort
             port <- P.takeWhile1 (/= 47 ) 
             return (hostname, port)
         withoutPort = do
-            hostname <- "http://" *> P.takeWhile (/= 58) <* endOfInput
+            hostname <- "http://" *> P.takeWhile (/= 47)
+            takeTill P8.isEndOfLine
             return (hostname, "80")
     
 data Header = Header {

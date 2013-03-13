@@ -1,14 +1,13 @@
 -- | Simple shoutcast server for streaming audio broadcast.
 
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE BangPatterns #-}
     
 module Main where
 
 import BasicPrelude 
 import Prelude ()
-import qualified Prelude as Prelude
+import qualified Prelude 
 
 import Control.Concurrent hiding (yield)
 import Control.Concurrent.Chan
@@ -35,13 +34,12 @@ import Snap.Core (Snap, Method(..))
 import Snap.Http.Server
 import Snap.Http.Server.Config
 
+import Data.Aeson
 import Data.Word (Word8)
 import Control.Applicative
 import Data.Attoparsec.RFC2616
 import Data.Attoparsec (parseOnly)
 import Data.Typeable (typeOf)
-
-import Data.Aeson
 
 
 
@@ -213,11 +211,8 @@ deleteStreamHandler radio = do
     maybe (Sn.finishWith $ Sn.setResponseCode 400 Sn.emptyResponse) rmSt param
     where
       rmSt i = do
-          result <-  liftIO $ rmStream radio (RadioId i) 
-          if result
-             then Sn.finishWith $ Sn.setResponseCode 200 Sn.emptyResponse
-             else Sn.finishWith $ Sn.setResponseCode 403 Sn.emptyResponse
-
+          result <-  liftIO $ rmStream radio (RadioId i)
+          Sn.finishWith $ Sn.setResponseCode (if result then 200 else 403) Sn.emptyResponse 
     
 
 
@@ -305,6 +300,8 @@ openConnection (Url url) = do
         let Right (hb, pb) = parseOnly parseUrl url
             h = C.unpack hb
             p = C.unpack pb
+        print h
+        print p
         is <- getAddrInfo (Just hints) (Just h) (Just p)
         let addr = head is
         let a = addrAddress addr
@@ -324,6 +321,9 @@ testUrl1 = "http://bigblueswing.com"
 testUrl2 :: ByteString
 testUrl2 = "http://bigblueswing.com:2002/asdf"
 
+testUrl3 ::ByteString
+testUrl3 = "http://bigblueswing.com/asdf"
+
 successRespo :: ByteString
 successRespo = BS.concat [ "ICY 200 OK\r\n"
                          , "icy-notice1: Haskell shoucast splitter\r\n"
@@ -336,5 +336,4 @@ successRespo = BS.concat [ "ICY 200 OK\r\n"
                          , "icy-metaint: 0\n"
                          , "icy-br: 64\r\n\r\n"
                          ]
-
 
