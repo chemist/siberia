@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Radio.Internal (SettingsById(..), Api(..)) where
+module Radio.Internal (DataApi(..), WebApi(..)) where
 
 import           BasicPrelude
 import           Control.Concurrent           hiding (yield)
@@ -20,7 +20,7 @@ import           System.IO.Streams.Concurrent as S
 
 import           Radio.Data
 
-class SettingsById a where
+class DataApi a where
     member   :: RadioId -> a -> IO Bool
     info     :: RadioId -> a -> IO (MVar RadioInfo)
     urlG     :: a -> RadioId -> IO Url
@@ -35,13 +35,20 @@ class SettingsById a where
     chanS    :: Chan (Maybe ByteString) -> a -> RadioId -> IO ()
     hostG    :: a -> RadioId -> IO HostPort
 
-class Api a where
+class WebApi a where
     allStream:: a -> IO [RadioInfo]
     addStream:: a -> RadioInfo -> IO Bool
     rmStream :: a -> RadioId -> IO Bool
 
+class StreamApi a where
+    -- | создаем канал с потоком с радиостанции
+    makeClient:: a -> RadioId -> IO (Maybe (Chan (Maybe ByteString)))
+    -- | создаем InputStream с радиостанции
+    makeConnect:: a -> RadioId -> IO (InputStream ByteString)
 
-instance SettingsById Radio where
+
+
+instance DataApi Radio where
     member rid' (Radio radio _) = withMVar radio $ \x -> return $ rid' `Map.member` x
     info rid' (Radio radio _) = withMVar radio $ \x -> return $ fromJust $ Map.lookup rid' x
     urlG =  getter $ return . url
@@ -78,7 +85,7 @@ setter f radio rid' = do
 
 
 
-instance Api Radio where
+instance WebApi Radio where
     allStream (Radio x _) = withMVar x fromMVar
         where
           fromMVar :: Map RadioId (MVar RadioInfo) -> IO [RadioInfo]
@@ -106,30 +113,25 @@ addSlash (RadioId x) = RadioId $ BS.concat ["/", x]
 addHostPort::HostPort -> RadioInfo -> RadioInfo
 addHostPort hp x = x { hostPort = hp }
 
-
-makeClient::Radio -> RadioId -> IO (Maybe (Chan (Maybe ByteString)))
-makeClient radio rid' = do
-    radioStreamInput <- getConnect radio rid'
-    chan <- newChan
-    chanStreamOutput <- S.chanToOutput chan
-    chanStreamInput  <- S.chanToInput  chan
-    devNull <- S.nullOutput
-    forkIO $ S.connect radioStreamInput  chanStreamOutput
-    forkIO $ S.connect chanStreamInput devNull
-    -- | @TODO save pid
-    return $ Just chan
-
-
-getConnect::Radio -> RadioId -> IO (InputStream ByteString)
-getConnect radio rid' = do
-    url' <- urlG radio rid'
-    (i, o) <- openConnection url'
-    getStream <- S.fromByteString "GET / HTTP/1.0\r\nIcy-MetaData: 1\r\n\r\n"
-    S.connect getStream o
-    result <- S.parseFromStream response i
-    print result
-    return i
-
+instance StreamApi Radio where
+    makeClient radio rid' = do
+        radioStreamInput <- makeConnect radio rid'
+        chan <- newChan
+        chanStreamOutput <- S.chanToOutput chan
+        chanStreamInput  <- S.chanToInput  chan
+        devNull <- S.nullOutput
+        forkIO $ S.connect radioStreamInput  chanStreamOutput
+        forkIO $ S.connect chanStreamInput devNull
+        -- | @TODO save pid
+        return $ Just chan
+    makeConnect radio rid' = do
+        url' <- urlG radio rid'
+        (i, o) <- openConnection url'
+        getStream <- S.fromByteString "GET / HTTP/1.0\r\nIcy-MetaData: 1\r\n\r\n"
+        S.connect getStream o
+        result <- S.parseFromStream response i
+        print result
+        return i
 
 openConnection :: Url -> IO (InputStream ByteString, OutputStream ByteString)
 openConnection (Url url') = do
