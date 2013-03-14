@@ -14,7 +14,7 @@ import           Snap.Http.Server    (quickHttpServe)
 import           Snap.Util.FileServe (serveDirectory, serveFile)
 
 import           Radio.Data
-import           Radio.Internal      ()
+import           Radio.Internal      (Api (..))
 
 web::Radio -> IO ()
 web radio = quickHttpServe $ ifTop (serveFile "static/index.html") <|>

@@ -58,24 +58,3 @@ instance FromJSON RadioInfo where
 
 data Radio = Radio (MVar (Map RadioId (MVar RadioInfo))) HostPort
 
-class SettingsById a where
-    member   :: RadioId -> a -> IO Bool
-    info     :: RadioId -> a -> IO (MVar RadioInfo)
-    urlG     :: a -> RadioId -> IO Url
-    urlS     :: Url -> a -> RadioId -> IO ()
-    pidG     :: a -> RadioId -> IO (Maybe ThreadId)
-    pidS     :: Maybe ThreadId -> a -> RadioId -> IO ()
-    headersG :: a -> RadioId -> IO Headers
-    headersS :: Headers -> a -> RadioId -> IO ()
-    metaG    :: a -> RadioId -> IO (Maybe Meta)
-    metaS    :: Maybe Meta -> a -> RadioId -> IO ()
-    chanG    :: a -> RadioId -> IO (Maybe (Chan (Maybe ByteString)))
-    chanS    :: Chan (Maybe ByteString) -> a -> RadioId -> IO ()
-    hostG    :: a -> RadioId -> IO HostPort
-
-class Api a where
-    allStream:: a -> IO [RadioInfo]
-    addStream:: a -> RadioInfo -> IO Bool
-    rmStream :: a -> RadioId -> IO Bool
-
-

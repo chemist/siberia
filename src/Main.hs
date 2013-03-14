@@ -31,8 +31,8 @@ import           System.IO.Streams.Concurrent as S
 import           Data.Attoparsec.RFC2616      (Request (..), request)
 
 import           Radio.Data
-import           Radio.Internal               ()
-import           Radio.Web
+import           Radio.Internal               (SettingsById (..))
+import           Radio.Web                    (web)
 
 
 main::IO ()
