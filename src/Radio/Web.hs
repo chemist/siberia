@@ -14,50 +14,52 @@ import           Snap.Http.Server    (quickHttpServe)
 import           Snap.Util.FileServe (serveDirectory, serveFile)
 
 import           Radio.Data
-import           Radio.Internal      (WebApi (..))
+import           Radio.Internal      (webApi)
 
-web::Radio -> IO ()
-web radio = quickHttpServe $ ifTop (serveFile "static/index.html") <|>
-                             method GET ( route [ ("server/stats", statsHandler radio)
-                                                      , ("stream", getStreamHandler radio)
-                                                      , ("stream/:sid", streamHandlerById radio)
-                                                      , ("stream/:sid/metadata", streamMetaHandler radio)
+web::WebApi Radio -> IO ()
+web api = quickHttpServe $ ifTop (serveFile "static/index.html") <|>
+                             method GET ( route [ ("server/stats", statsHandler api)
+                                                      , ("stream", getStreamHandler api)
+                                                      , ("stream/:sid", streamHandlerById api)
+                                                      , ("stream/:sid/metadata", streamMetaHandler api)
                                                       ])                                                  <|>
-                             method POST ( route [ ("stream/:sid", postStreamHandler radio) ] )     <|>
-                             method DELETE ( route [ ("stream/:sid", deleteStreamHandler radio) ] ) <|>
+                             method POST ( route [ ("stream/:sid", postStreamHandler api) ] )     <|>
+                             method DELETE ( route [ ("stream/:sid", deleteStreamHandler api) ] ) <|>
                              dir "static" (serveDirectory "./static")
 
 statsHandler radio = writeText "stats"
 
-getStreamHandler ::Radio -> Snap ()
+getStreamHandler ::WebApi Radio -> Snap ()
 getStreamHandler radio = do
         s <- liftIO $ allStream radio
         writeLBS $ encode s
 
-postStreamHandler::Radio -> Snap ()
+postStreamHandler::WebApi Radio -> Snap ()
 postStreamHandler radio = do
         info' <- decode <$> readRequestBody 1024  :: Snap (Maybe RadioInfo)
         case info' of
              Nothing -> finishWith $ setResponseCode 400 emptyResponse
              Just i -> do
-                 result <- liftIO $ addStream radio i
+                 (result, infoWithHostPort) <- liftIO $ addStream radio i
                  if result
-                    then writeLBS $ encode i
+                    then do
+                        writeLBS $ encode infoWithHostPort
                     else finishWith $ setResponseCode 409 emptyResponse
 
-deleteStreamHandler::Radio -> Snap ()
+deleteStreamHandler::WebApi Radio -> Snap ()
 deleteStreamHandler radio = do
     param <- getParam "sid"
     maybe (finishWith $ setResponseCode 400 emptyResponse) rmSt param
     where
       rmSt i = do
+          liftIO $ print i
           result <-  liftIO $ rmStream radio (RadioId i)
           finishWith $ setResponseCode (if result then 200 else 403) emptyResponse
 
 
 
-streamHandlerById::Radio -> Snap ()
-streamHandlerById radio = method GET $ do
+streamHandlerById::WebApi Radio -> Snap ()
+streamHandlerById radio = do
     param <- getParam "sid"
     maybe justGetStream withParam param
     where

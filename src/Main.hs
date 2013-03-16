@@ -31,7 +31,7 @@ import           System.IO.Streams.Concurrent as S
 import           Data.Attoparsec.RFC2616      (Request (..), request)
 
 import           Radio.Data
-import           Radio.Internal               (DataApi (..))
+import           Radio.Internal
 import           Radio.Web                    (web)
 
 
@@ -39,7 +39,7 @@ main::IO ()
 main = do
     host <- getHostName
     stations <- makeRadioStation $ Just (host, 2000)
-    forkIO $ web stations
+    forkIO $ web $ webApi stations
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1
     bindSocket sock (SockAddrInet (toEnum port) 0)
@@ -75,10 +75,12 @@ connectHandler (inputS, outputS) radio = do
                      | otherwise                                = S.write (Just "ICY 400 Bad Request\r\n") outputS
 
         goodRequest (request', headers') = do
-            idInBase <- (RadioId $ requestUri request') `member` radio
+            let oneStream' = oneStream radio (RadioId $ requestUri request')
+                dataApi' = dataApi oneStream'
+            idInBase <- member oneStream'
             if idInBase
                then do
-                   !chan <- chanG radio (RadioId $ requestUri request')
+                   !chan <- chanG dataApi'
                    threadDelay 1000000
                    print request'
                    print headers'
