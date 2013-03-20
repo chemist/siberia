@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Radio.Internal (dataApi, streamApi, oneStream,  webApi) where
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FunctionalDependencies #-}
+module Radio.Internal (module Radio.Data, makeChannel) where
 
 import           BasicPrelude
 import           Control.Concurrent           hiding (yield)
@@ -18,125 +19,110 @@ import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
 
+import Control.Monad.Reader
 
-import           Radio.Data
+import  Radio.Data ()
+import qualified Radio.Data as D
 
-webApi :: Radio -> WebApi Radio
-webApi x = WebApi {
-    allStream = wallStream x
-  , addStream = waddStream x
-  , rmStream = wrmStream x
-  }
+instance D.Allowed m => D.Storable m D.Radio where
+    member r = do
+        (D.Store x _) <- ask
+        liftIO $ withMVar x $ \y -> return $ (D.rid r) `Map.member` y
+    create r = do
+        (D.Store x hp) <- ask
+        let withPort = addHostPort hp r
+        is <- D.member r
+        if is 
+           then return (False, undefined)
+           else do
+               mv <- liftIO $ newMVar withPort
+               liftIO $ modifyMVar_ x $ \mi -> return $ Map.insert (D.rid r) mv mi
+               return (True, withPort)
+    remove r = do
+        (D.Store x _) <- ask
+        is <- D.member r
+        if is 
+           then do
+               liftIO $ modifyMVar_ x $ \mi -> return $ Map.delete (D.rid r) mi
+               return True
+           else return False
+    list = do
+        (D.Store x _) <- ask
+        liftIO $ withMVar x fromMVar
+        where 
+          fromMVar :: Map D.RadioId (MVar D.Radio) -> IO [D.Radio]
+          fromMVar y = Prelude.mapM (\(_, mv) -> withMVar mv return) $ Map.toList y
+    info a = do
+        (D.Store x _) <- ask
+        liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (D.rid a) y
+          
+addHostPort::D.HostPort -> D.Radio -> D.Radio
+addHostPort hp x = x { D.hostPort = hp }
 
+-- | helpers
+getter ::(D.Radio -> a) -> MVar D.Radio -> IO a
+getter x y =  flip  withMVar (return . x)  y
 
-streamApi :: OneStream -> StreamApi
-streamApi x = StreamApi {
-  makeConnect = do
-    url' <- urlG $ dataApi x
-    (i, o) <- openConnection url'
-    getStream <- S.fromByteString "GET / HTTP/1.0\r\nIcy-MetaData: 1\r\n\r\n"
-    S.connect getStream o
-    result <- S.parseFromStream response i
-    print result
-    return i
-  , makeClient = do
-     radioStreamInput <- makeConnect $ streamApi x
-     chan <- newChan
-     chanStreamOutput <- S.chanToOutput chan
-     chanStreamInput  <- S.chanToInput  chan
-     devNull <- S.nullOutput
-     forkIO $ S.connect radioStreamInput  chanStreamOutput
-     forkIO $ S.connect chanStreamInput devNull
-     -- | @TODO save pid
-     return $ Just chan
-  }
+setter :: (D.Radio -> D.Radio) -> MVar D.Radio -> IO ()
+setter x y =  flip modifyMVar_ (return . x)  y
 
-openConnection :: Url -> IO (InputStream ByteString, OutputStream ByteString)
-openConnection (Url url') = do
-        let Right (hb, pb) = parseOnly parseUrl url'
-            h = C.unpack hb
-            p = C.unpack pb
-        print h
-        print p
-        is <- getAddrInfo (Just hints) (Just h) (Just p)
-        let addr = head is
-        let a = addrAddress addr
-        s <- socket (addrFamily addr) Stream defaultProtocol
-        Network.Socket.connect s a
-        (i,o) <- S.socketToStreams s
-        return (i, o)
-        where
-           hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
-
-
-oneStream :: Radio -> RadioId -> OneStream
-oneStream radio rid' = OneStream {
-  member = dmember rid' radio
-  , info = dinfo rid' radio
-  }
-
-dmember rid' (Radio radio _) = withMVar radio $ \x -> return $ rid' `Map.member` x
-dinfo rid' (Radio radio _) = withMVar radio $ \x -> return $ fromJust $ Map.lookup rid' x
-
-dataApi :: OneStream -> DataApi
-dataApi stream = DataApi {
-    urlG = getter' url $ info stream
-  , pidG = getter' pid $ info stream
-  , metaG = getter' meta $ info stream
-  , hostG = getter' hostPort $ info stream
-  , urlS = \x -> setter' (\y -> y { url = x}) $ info stream
-  , pidS = \x -> setter' (\y -> y { pid = x}) $ info stream
-  , headersS = \x -> setter' (\y -> y { headers = x}) $ info stream
-  , metaS = \x -> setter' (\y -> y { meta = x}) $ info stream
-  , headersG = getter' headers $ info stream
-  , chanS = \x -> setter' (\y -> y { channel = Just x }) $ info stream
-  , chanG = do
-    chan <- getter' channel $ info stream
-    case chan of
-      Nothing -> do
-        Just chan' <- makeClient $ streamApi stream
-        chanS (dataApi stream) chan'
-        dup <- dupChan chan'
-        return $ Just dup
-      Just chan' -> do
-        dup <- dupChan chan'
-        return $ Just dup
-  }
-
-getter' :: (RadioInfo -> a) -> IO (MVar RadioInfo) -> IO a
-getter' x y = join $ flip  withMVar (return . x) <$> y
-
-setter' :: (RadioInfo -> RadioInfo) -> IO (MVar RadioInfo) -> IO ()
-setter' x y = join $ flip modifyMVar_ (return . x) <$> y
+instance D.Allowed m => D.Detalization m D.Url where
+    get radio = D.info radio >>= liftIO . getter D.url 
+    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.url = a })
+    
+instance D.Allowed m => D.Detalization m D.Headers where
+    get radio = D.info radio >>= liftIO . getter D.headers
+    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.headers = a })
+    
+instance D.Allowed m => D.Detalization m D.Channel where
+    get radio = D.info radio >>= liftIO . getter D.channel
+    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.channel = a })
+    
+-- | создаем канал
+makeChannel::D.Radio -> D.Application ()
+makeChannel radio = do
+    radioStreamInput <- makeConnect radio
+    chan <- liftIO $ newChan
+    chanStreamOutput <- liftIO $ S.chanToOutput chan
+    chanStreamInput  <- liftIO $ S.chanToInput  chan
+    devNull <- liftIO $ S.nullOutput
+    liftIO $ forkIO $ S.connect radioStreamInput  chanStreamOutput
+    liftIO $ forkIO $ S.connect chanStreamInput devNull
+    D.set radio $ Just chan
+    -- | @TODO save pid
+    return ()
+    
+-- | создаем соединение до стрим сервера
+makeConnect :: D.Radio -> D.Application (InputStream ByteString)
+makeConnect radio = do
+   (i, o) <- openConnection radio
+   getStream <- liftIO $ S.fromByteString "GET / HTTP/1.0\r\nIcy-MetaData: 1\r\n\r\n"
+   liftIO $ S.connect getStream o
+   (response, headers) <- liftIO $ S.parseFromStream response i
+   -- | @TODO обработать исключения
+   D.set radio headers
+   liftIO $ print response
+   return i
 
 
-
-wallStream (Radio x _) = withMVar x fromMVar
+-- | открываем соединение до стрим сервера 
+openConnection :: D.Radio -> D.Application (InputStream ByteString, OutputStream ByteString)
+openConnection radio = do
+    D.Url url' <- D.get radio
+    let Right (hb, pb) = parseOnly parseUrl url'
+        h = C.unpack hb
+        p = C.unpack pb
+    liftIO $ print h
+    liftIO $ print p
+    is <- liftIO $ getAddrInfo (Just hints) (Just h) (Just p)
+    let addr = head is
+    let a = addrAddress addr
+    s <- liftIO $  socket (addrFamily addr) Stream defaultProtocol
+    liftIO $ Network.Socket.connect s a
+    (i,o) <- liftIO $ S.socketToStreams s
+    return (i, o)
     where
-      fromMVar :: Map RadioId (MVar RadioInfo) -> IO [RadioInfo]
-      fromMVar y = Prelude.mapM (\(_, mv) -> withMVar mv return) $ Map.toList y
-
-waddStream (Radio x hp) radioInfo = do
-    is <- rid radioInfo `dmember` Radio x hp
-    if is
-       then return (False, undefined)
-       else do
-           mv <- newMVar withPort
-           modifyMVar_ x $ \mi -> return $ Map.insert (rid radioInfo) mv mi
-           return (True, withPort)
-    where withPort = addHostPort hp radioInfo
-
-wrmStream (Radio x hp) rid' = do
-   is <- rid' `dmember` Radio x hp
-   if is
-      then do
-          modifyMVar_ x $ \mi -> return $ Map.delete rid' mi
-          return True
-      else return False
+       hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
 
 
-addSlash::RadioId -> RadioId
-addSlash (RadioId x) = RadioId $ BS.concat ["/", x]
 
-addHostPort::HostPort -> RadioInfo -> RadioInfo
-addHostPort hp x = x { hostPort = hp }
