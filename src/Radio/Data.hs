@@ -25,6 +25,8 @@ import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
 import Control.Monad.Reader
 import           Snap.Core           (Snap)
+import qualified Data.Binary as B
+import Data.Binary (Binary, Get)
 
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
@@ -38,6 +40,15 @@ instance ToJSON RadioId where
 
 instance ToJSON Url where
     toJSON (Url x) = toJSON x
+    
+instance Binary Url where
+    put (Url x) = B.put x
+    get = Url <$> B.get
+    
+instance Binary RadioId where
+    put (RadioId x) = B.put x
+    get = RadioId <$> B.get
+    
 
 port :: Int
 port = 2000
@@ -54,9 +65,18 @@ data RadioInfo x = RI { rid      :: x
                       
 type Radio = RadioInfo RadioId
 
+instance Binary Radio where
+    put x = do
+        B.put $ rid x
+        B.put $ url x
+    get = do
+        r <- B.get :: Get RadioId
+        u <- B.get :: Get Url
+        return $ RI r u Nothing [] Nothing Nothing Nothing 
+
 data Store a = Store (MVar (Map RadioId (MVar a))) HostPort
 
-type RadioStore = Store (RadioInfo RadioId)
+type RadioStore = Store Radio
 
 type Application = ReaderT RadioStore IO
 
@@ -76,6 +96,8 @@ class Storable m a where
     remove :: a -> m Bool
     list   :: m [a]
     info   :: a -> m (MVar a)
+    save   :: Prelude.FilePath -> m ()
+    load   :: Prelude.FilePath -> m ()
     
     
 class Detalization m a where

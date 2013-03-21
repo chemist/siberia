@@ -12,6 +12,7 @@ import           Control.Category
 import           Data.Attoparsec              (parseOnly)
 import           Data.Attoparsec.RFC2616
 import qualified Data.ByteString              as BS
+import qualified Data.ByteString.Lazy         as LS
 import qualified Data.ByteString.Char8        as C
 import           Data.Maybe                   (fromJust)
 import           Network.Socket
@@ -20,9 +21,11 @@ import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
 
 import Control.Monad.Reader
+import qualified Control.Monad.Reader as R
 
 import  Radio.Data ()
 import qualified Radio.Data as D
+import Data.Binary
 
 instance D.Allowed m => D.Storable m D.Radio where
     member r = do
@@ -55,6 +58,15 @@ instance D.Allowed m => D.Storable m D.Radio where
     info a = do
         (D.Store x _) <- ask
         liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (D.rid a) y
+    -- | @TODO catch exception
+    save path = do
+        l <- D.list :: D.Allowed m => m [D.Radio]
+        liftIO $ LS.writeFile path $ encode l
+    load path = do
+        l <- liftIO $ LS.readFile path
+        R.mapM_ D.create $ (decode l :: [D.Radio])
+        return ()        
+        
           
 addHostPort::D.HostPort -> D.Radio -> D.Radio
 addHostPort hp x = x { D.hostPort = hp }

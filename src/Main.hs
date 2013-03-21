@@ -44,6 +44,7 @@ main = do
     state <- emptyState
     -- | start web application
     forkIO $ quickHttpServe $ runWeb web state
+--    runReaderT (load "radiobase") state
     -- | open socket 
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1
