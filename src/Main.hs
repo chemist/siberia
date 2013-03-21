@@ -9,6 +9,7 @@ import           BasicPrelude                 hiding (concat)
 import qualified Prelude
 
 import           Control.Concurrent           (forkIO, newMVar, threadDelay)
+import Control.Concurrent.Chan(dupChan)
 
 import           Data.ByteString              (concat)
 
@@ -35,6 +36,7 @@ import           Radio.Data
 import           Radio.Internal
 import           Radio.Web                    (web)
 import           Snap.Http.Server    (quickHttpServe)
+
 
 
 main::IO ()
@@ -69,32 +71,42 @@ connectHandler (iS, oS) = do
         let channel = ById (RadioId $ requestUri request)
         is <- member $ channel
         if is
-        then do
-          liftIO $ print "make connection"
-          liftIO $ print request
-          liftIO $ print headers
-          makeClient oS channel
-        else do
+          then do
+             liftIO $ print "make connection"
+             liftIO $ print request
+             liftIO $ print headers
+             makeClient oS channel 
+          else do
            -- | unknown rid
-          liftIO $ print request
-          liftIO $ print headers
-          liftIO $ S.write (Just "ICY 404 Not Found\r\n") oS
+             liftIO $ print request
+             liftIO $ print headers
+             liftIO $ S.write (Just "ICY 404 Not Found\r\n") oS
           
     showType :: SomeException -> String
     showType = Prelude.show . typeOf
 
 makeClient :: OutputStream ByteString -> Radio -> Application ()
 makeClient oS radio = do
-    makeChannel radio
-    liftIO $ threadDelay 1000000
+    chan <- get radio :: Application Channel
+    when (isNothing chan) $ do
+        makeChannel radio
+        liftIO $ threadDelay 1000000
     chan <- get radio :: Application Channel
     case chan of
          Just chan' -> do
+             duplicate <- liftIO $ dupChan chan'
+             -- | пауза чтоб набрать буфер
+             liftIO $ threadDelay 2000000 
              start <- liftIO $ S.fromByteString successRespo
-             input <- liftIO $ S.chanToInput chan'
-             liftIO $ S.supply start oS
-             liftIO $ S.connect input oS
+             input <- liftIO $ S.chanToInput duplicate
+             liftIO $ S.supply start oS 
+             fin <- liftIO $ try $ S.connect input oS  :: Application (Either SomeException ())
+             either whenError whenGood fin
+             liftIO $ print "make finally work"
          Nothing -> liftIO $ S.write (Just "ICY 423 Locked\r\n") oS
+    where
+      whenError s = liftIO $ print $ "catched: " ++ show s
+      whenGood _ = return ()
     
 emptyState::IO RadioStore
 emptyState = do

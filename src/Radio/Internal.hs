@@ -81,16 +81,22 @@ instance D.Allowed m => D.Detalization m D.Channel where
 -- | создаем канал
 makeChannel::D.Radio -> D.Application ()
 makeChannel radio = do
-    radioStreamInput <- makeConnect radio
-    chan <- liftIO $ newChan
-    chanStreamOutput <- liftIO $ S.chanToOutput chan
-    chanStreamInput  <- liftIO $ S.chanToInput  chan
-    devNull <- liftIO $ S.nullOutput
-    liftIO $ forkIO $ S.connect radioStreamInput  chanStreamOutput
-    liftIO $ forkIO $ S.connect chanStreamInput devNull
-    D.set radio $ Just chan
-    -- | @TODO save pid
-    return ()
+    radioStreamInput <- try $ makeConnect radio :: D.Application (Either SomeException (InputStream ByteString))
+    either whenError whenGood radioStreamInput
+    where 
+      whenError x = do
+          liftIO $ print $ "Error when connection: " ++ show x 
+          D.set radio $ (Nothing :: Maybe (Chan (Maybe ByteString)))
+      whenGood radioStreamInput' = do
+          chan <- liftIO $ newChan
+          chanStreamOutput <- liftIO $ S.chanToOutput chan
+          chanStreamInput  <- liftIO $ S.chanToInput  chan
+          devNull <- liftIO $ S.nullOutput
+          liftIO $ forkIO $ S.connect radioStreamInput'  chanStreamOutput
+          liftIO $ forkIO $ S.connect chanStreamInput devNull
+          D.set radio $ (Just chan :: Maybe (Chan (Maybe ByteString)))
+          -- | @TODO save pid
+          return ()
     
 -- | создаем соединение до стрим сервера
 makeConnect :: D.Radio -> D.Application (InputStream ByteString)
