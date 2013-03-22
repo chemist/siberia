@@ -26,6 +26,7 @@ import qualified Control.Monad.Reader as R
 import  Radio.Data ()
 import qualified Radio.Data as D
 import Data.Binary
+import Data.Attoparsec.RFC2616 (lookupHeader)
 
 instance D.Allowed m => D.Storable m D.Radio where
     member r = do
@@ -125,8 +126,22 @@ makeConnect radio = do
    -- | @TODO обработать исключения
    D.set radio headers
    liftIO $ print response
+--   liftIO $ print headers
    return i
 
+getMeta :: D.Radio -> InputStream ByteString -> D.Application (InputStream ByteString)
+getMeta radio i = do
+    metaHeader <- lookupHeader "icy-metaint" <$> D.get radio :: D.Application [ByteString]
+    liftIO $ print $ "found meta" ++ show metaHeader 
+    case metaHeader of
+         [x] -> do
+             case readInt x of
+                  Just (meta,_) -> do
+                      from <- S.readExactly meta i
+                      undefined
+                  Nothing -> return i
+         _ -> return i
+    
 
 -- | открываем соединение до стрим сервера 
 openConnection :: D.Radio -> D.Application (InputStream ByteString, OutputStream ByteString)
