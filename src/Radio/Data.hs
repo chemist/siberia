@@ -96,8 +96,9 @@ class Storable m a where
     remove :: a -> m Bool
     list   :: m [a]
     info   :: a -> m (MVar a)
-    save   :: Prelude.FilePath -> m ()
-    load   :: Prelude.FilePath -> m ()
+--    save   :: Prelude.FilePath -> m ()
+--    load   :: Prelude.FilePath -> m ()
+    
     
     
 class Detalization m a where

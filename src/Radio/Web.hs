@@ -22,12 +22,16 @@ web =  ifTop (serveFile "static/index.html")
                               , ("stream", getStreamHandler )
                               , ("stream/:sid", streamHandlerById )
                               , ("stream/:sid/metadata", streamMetaHandler )
+                              , ("save", saveHandler)
                               ] )                                              
        <|> method POST ( route [ ("stream/:sid", postStreamHandler ) ] )     
        <|> method DELETE ( route [ ("stream/:sid", deleteStreamHandler ) ] )
        <|> dir "static" (serveDirectory "./static")
 
 statsHandler = writeText "stats"
+
+saveHandler::Web ()
+saveHandler = save "radiobase"
 
 getStreamHandler :: Web ()
 getStreamHandler = do

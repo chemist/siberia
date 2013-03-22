@@ -8,7 +8,7 @@ module Main where
 import           BasicPrelude                 hiding (concat)
 import qualified Prelude
 
-import           Control.Concurrent           (forkIO, newMVar, threadDelay)
+import           Control.Concurrent           (myThreadId, forkIO, newMVar, threadDelay)
 import Control.Concurrent.Chan(dupChan)
 
 import           Data.ByteString              (concat)
@@ -37,14 +37,19 @@ import           Radio.Internal
 import           Radio.Web                    (web)
 import           Snap.Http.Server    (quickHttpServe)
 
+import System.Posix.Signals
+import System.Posix.Process(exitImmediately)
+import System.Exit(ExitCode(ExitSuccess))
+
 
 
 main::IO ()
 main = do
+    mainId <- myThreadId
     state <- emptyState
     -- | start web application
     forkIO $ quickHttpServe $ runWeb web state
---    runReaderT (load "radiobase") state
+    try $ runReaderT (load "radiobase") state :: IO (Either SomeException ())
     -- | open socket 
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FunctionalDependencies #-}
-module Radio.Internal (module Radio.Data, makeChannel) where
+module Radio.Internal (module Radio.Data, makeChannel, load, save) where
 
 import           BasicPrelude
 import           Control.Concurrent           hiding (yield)
@@ -59,13 +59,18 @@ instance D.Allowed m => D.Storable m D.Radio where
         (D.Store x _) <- ask
         liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (D.rid a) y
     -- | @TODO catch exception
-    save path = do
-        l <- D.list :: D.Allowed m => m [D.Radio]
-        liftIO $ LS.writeFile path $ encode l
-    load path = do
-        l <- liftIO $ LS.readFile path
-        R.mapM_ D.create $ (decode l :: [D.Radio])
-        return ()        
+    -- 
+
+save :: D.Allowed m => Prelude.FilePath -> m ()
+save path = do
+    l <- D.list :: D.Allowed m => m [D.Radio]
+    liftIO $ LS.writeFile path $ encode l
+    
+load :: D.Allowed m => Prelude.FilePath -> m ()
+load path = do
+    l <- liftIO $ LS.readFile path
+    R.mapM_ D.create $ (decode l :: [D.Radio])
+    return ()        
         
           
 addHostPort::D.HostPort -> D.Radio -> D.Radio
