@@ -96,6 +96,10 @@ instance D.Allowed m => D.Detalization m D.Channel where
     get radio = D.info radio >>= liftIO . getter D.channel
     set radio a = D.info radio >>= liftIO . setter (\y -> y { D.channel = a })
     
+instance D.Allowed m => D.Detalization m (Maybe D.Meta) where
+    get radio = D.info radio >>= liftIO . getter D.meta
+    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.meta = a })
+    
 -- | создаем канал
 makeChannel::D.Radio -> D.Application ()
 makeChannel radio = do
@@ -125,22 +129,37 @@ makeConnect radio = do
    (response, headers) <- liftIO $ S.parseFromStream response i
    -- | @TODO обработать исключения
    D.set radio headers
+   resultStream <- getMeta radio i
    liftIO $ print response
---   liftIO $ print headers
-   return i
+   liftIO $ print headers
+   return resultStream
 
 getMeta :: D.Radio -> InputStream ByteString -> D.Application (InputStream ByteString)
 getMeta radio i = do
     metaHeader <- lookupHeader "icy-metaint" <$> D.get radio :: D.Application [ByteString]
     liftIO $ print $ "found meta" ++ show metaHeader 
-    case metaHeader of
-         [x] -> do
-             case C.readInt x of
-                  Just (meta,_) -> do
-                      from <- liftIO $ S.readExactly meta i
-                      undefined
-                  Nothing -> return i
-         _ -> return i
+    let metaInt = unpackMeta metaHeader
+    maybe (return i) (getMetaFromStream i) metaInt
+    where
+    
+        toLen :: ByteString -> Int
+        toLen x = let [w] = BS.unpack x
+                  in 16 * fromIntegral w
+                  
+        unpackMeta :: [ByteString] -> Maybe Int
+        unpackMeta meta = do
+            m <- listToMaybe meta
+            (a,_) <- C.readInt m
+            return a
+            
+        getMetaFromStream :: InputStream ByteString -> Int -> D.Application (InputStream ByteString)
+        getMetaFromStream i mi = do
+            from <- liftIO $ S.readExactly mi i
+            len <- liftIO $ toLen <$> S.readExactly 1 i
+            metaInfo <- liftIO $ S.readExactly len i
+            liftIO $ print metaInfo
+            D.set radio (Just $ D.Meta (metaInfo, len)) 
+            return i
     
 
 -- | открываем соединение до стрим сервера 
