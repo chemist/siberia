@@ -102,11 +102,12 @@ makeClient oS radio = do
          Just chan' -> do
              duplicate <- liftIO $ dupChan chan'
              -- | пауза чтоб набрать буфер
-             liftIO $ threadDelay 2000000 
              start <- liftIO $ S.fromByteString successRespo
              input <- liftIO $ S.chanToInput duplicate
+             withMeta <- setMeta radio input
+             liftIO $ threadDelay 2000000 
              liftIO $ S.supply start oS 
-             fin <- liftIO $ try $ S.connect input oS  :: Application (Either SomeException ())
+             fin <- liftIO $ try $ S.connect withMeta oS  :: Application (Either SomeException ())
              either whenError whenGood fin
              liftIO $ print "make finally work"
          Nothing -> liftIO $ S.write (Just "ICY 423 Locked\r\n") oS
@@ -129,8 +130,8 @@ successRespo = concat [ "ICY 200 OK\r\n"
                       , "icy-url: http://localhost:2000/big \r\n"
                       , "icy-genre: Swing  Big Band  Jazz  Blues\r\n"
                       , "icy-pub: 1\r\n"
-                      , "icy-metaint: 0\n"
-                      , "icy-br: 64\r\n\r\n"
+                      , "icy-metaint: 8192\n"
+                      , "icy-br: 128\r\n\r\n"
                       ]
 
    

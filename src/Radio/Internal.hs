@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FunctionalDependencies #-}
-module Radio.Internal (module Radio.Data, makeChannel, load, save) where
+module Radio.Internal (module Radio.Data, makeChannel, load, save, setMeta) where
 
 import           BasicPrelude
 import           Control.Concurrent           hiding (yield)
@@ -134,6 +134,7 @@ makeConnect radio = do
    liftIO $ print headers
    return resultStream
 
+-- | считываю metainfo с входного потока, сохраняю в состоянии
 getMeta :: D.Radio -> InputStream ByteString -> D.Application (InputStream ByteString)
 getMeta radio i = do
     metaHeader <- lookupHeader "icy-metaint" <$> D.get radio :: D.Application [ByteString]
@@ -159,9 +160,33 @@ getMeta radio i = do
             metaInfo <- liftIO $ S.readExactly len i
             liftIO $ print metaInfo
             D.set radio (Just $ D.Meta (metaInfo, len)) 
-            return i
-    
+            predicate <- liftIO $ S.fromByteString from
+            output <- liftIO $ S.appendInputStream predicate i 
+            return output
+            
 
+-- | вставляю metainfo в выходной поток
+setMeta :: D.Radio -> InputStream ByteString -> D.Application (InputStream ByteString)
+setMeta radio i = do
+    metaInfo <- D.get radio :: D.Application (Maybe D.Meta)
+    maybe (return i) (setMetaToOutputStream i) metaInfo
+    where
+        fromLen :: Int -> ByteString
+        fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16) 
+    
+        setMetaToOutputStream :: InputStream ByteString -> D.Meta -> D.Application (InputStream ByteString)
+        setMetaToOutputStream i (D.Meta (mi,l)) = do
+            let metaInt = 8192 
+            from <- liftIO $ S.readExactly metaInt i
+            from' <- liftIO $ S.fromByteString from
+            size <- liftIO $ S.fromByteString $ fromLen l
+            liftIO $ print $ "len " ++ show l
+            liftIO $ print $ "size " ++ (show $ fromLen l)
+            metaInfo <- liftIO $ S.fromByteString mi
+            output <- liftIO $ S.concatInputStreams [from', size, metaInfo, i]
+            return output
+            
+        
 -- | открываем соединение до стрим сервера 
 openConnection :: D.Radio -> D.Application (InputStream ByteString, OutputStream ByteString)
 openConnection radio = do
