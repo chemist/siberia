@@ -135,9 +135,9 @@ getMeta radio i = do
     liftIO $ print $ "found meta" ++ show metaHeader 
     case metaHeader of
          [x] -> do
-             case readInt x of
+             case C.readInt x of
                   Just (meta,_) -> do
-                      from <- S.readExactly meta i
+                      from <- liftIO $ S.readExactly meta i
                       undefined
                   Nothing -> return i
          _ -> return i
