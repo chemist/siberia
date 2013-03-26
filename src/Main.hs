@@ -5,13 +5,13 @@
 
 module Main where
 
-import           BasicPrelude                 hiding (concat)
+import           BasicPrelude                 hiding (concat, length, splitAt)
 import qualified Prelude
 
 import           Control.Concurrent           (myThreadId, forkIO, newMVar, threadDelay)
 import Control.Concurrent.Chan(dupChan)
 
-import           Data.ByteString              (concat)
+import           Data.ByteString              (concat, length, splitAt)
 
 import           Data.Map                     (singleton, empty)
 import qualified Data.Map  as Map
@@ -40,7 +40,7 @@ import           Snap.Http.Server    (quickHttpServe)
 import System.Posix.Signals
 import System.Posix.Process(exitImmediately)
 import System.Exit(ExitCode(ExitSuccess))
-
+import Debug.Trace
 
 
 main::IO ()
@@ -105,16 +105,28 @@ makeClient oS radio = do
              start <- liftIO $ S.fromByteString successRespo
              input <- liftIO $ S.chanToInput duplicate
              withMeta <- setMeta radio input
-             liftIO $ threadDelay 2000000 
-             liftIO $ S.supply start oS 
-             fin <- liftIO $ try $ S.connect withMeta oS  :: Application (Either SomeException ())
+--              liftIO $ S.supply start oS 
+             allInput <- liftIO $ S.concatInputStreams [ start, withMeta ]
+             fin <- liftIO $ try $ buffer 4096 allInput oS  :: Application (Either SomeException ())
              either whenError whenGood fin
              liftIO $ print "make finally work"
          Nothing -> liftIO $ S.write (Just "ICY 423 Locked\r\n") oS
     where
       whenError s = liftIO $ print $ "catched: " ++ show s
       whenGood _ = return ()
-    
+      
+
+debugConnect :: InputStream ByteString -> OutputStream ByteString -> IO ()
+debugConnect p q = loop
+  where
+      loop = do
+          m <- S.read p
+          maybe (S.write Nothing q)
+                (trace (Prelude.show (length $ fromJust m)) const $ write m q >> loop)
+                m
+{-# INLINE debugConnect #-}
+
+      
 emptyState::IO RadioStore
 emptyState = do
     host <- getHostName

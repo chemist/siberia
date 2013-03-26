@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FunctionalDependencies #-}
-module Radio.Internal (module Radio.Data, makeChannel, load, save, setMeta) where
+module Radio.Internal (module Radio.Data, makeChannel, load, save, setMeta, buffer) where
 
 import           BasicPrelude
 import           Control.Concurrent           hiding (yield)
@@ -27,6 +28,9 @@ import  Radio.Data ()
 import qualified Radio.Data as D
 import Data.Binary
 import Data.Attoparsec.RFC2616 (lookupHeader)
+import Blaze.ByteString.Builder (flush, fromByteString)
+import qualified Blaze.ByteString.Builder as Builder
+import Blaze.ByteString.Builder.Internal.Buffer (allNewBuffersStrategy)
 
 instance D.Allowed m => D.Storable m D.Radio where
     member r = do
@@ -114,12 +118,25 @@ makeChannel radio = do
           chanStreamOutput <- liftIO $ S.chanToOutput chan
           chanStreamInput  <- liftIO $ S.chanToInput  chan
           devNull <- liftIO $ S.nullOutput
-          liftIO $ forkIO $ S.connect radioStreamInput'  chanStreamOutput
+          liftIO $ forkIO $ buffer 131072 radioStreamInput'  chanStreamOutput
           liftIO $ forkIO $ S.connect chanStreamInput devNull
           D.set radio $ (Just chan :: Maybe (Chan (Maybe ByteString)))
           -- | @TODO save pid
           return ()
-    
+          
+buffer::Int -> InputStream ByteString -> OutputStream ByteString -> IO ()
+buffer size is os = do
+    let strategy = allNewBuffersStrategy size
+    builder <- S.builderStreamWith strategy os
+    loop builder
+    where 
+    loop builder = do
+        !m <- S.read is
+        maybe (S.write Nothing builder)
+              (\x -> S.write (Just $ Builder.fromByteString x) builder >> loop builder)
+              m
+{-# INLINE buffer #-}
+              
 -- | создаем соединение до стрим сервера
 makeConnect :: D.Radio -> D.Application (InputStream ByteString)
 makeConnect radio = do
