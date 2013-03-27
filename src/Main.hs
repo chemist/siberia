@@ -40,6 +40,7 @@ import           Snap.Http.Server    (quickHttpServe)
 import System.Posix.Signals
 import System.Posix.Process(exitImmediately)
 import System.Exit(ExitCode(ExitSuccess))
+import Blaze.ByteString.Builder (Builder, toByteString)
 import Debug.Trace
 
 
@@ -100,14 +101,18 @@ makeClient oS radio = do
     chan <- get radio :: Application Channel
     case chan of
          Just chan' -> do
+             Just buf' <- get radio :: Application (Maybe (Buffer ByteString))
              duplicate <- liftIO $ dupChan chan'
-             -- | пауза чтоб набрать буфер
              start <- liftIO $ S.fromByteString successRespo
              input <- liftIO $ S.chanToInput duplicate
-             withMeta <- setMeta radio input
+             birst <- liftIO $ getAll buf'
+             liftIO $ print $ "from birst" ++ (Prelude.show $ length birst)
+             birst' <- liftIO $ S.fromByteString birst
+             withoutMeta <- liftIO $ S.concatInputStreams [ birst', input ]
+             withMeta <- setMeta radio withoutMeta
 --              liftIO $ S.supply start oS 
              allInput <- liftIO $ S.concatInputStreams [ start, withMeta ]
-             fin <- liftIO $ try $ buffer 4096 allInput oS  :: Application (Either SomeException ())
+             fin <- liftIO $ try $ S.connect allInput oS  :: Application (Either SomeException ())
              either whenError whenGood fin
              liftIO $ print "make finally work"
          Nothing -> liftIO $ S.write (Just "ICY 423 Locked\r\n") oS
@@ -116,17 +121,6 @@ makeClient oS radio = do
       whenGood _ = return ()
       
 
-debugConnect :: InputStream ByteString -> OutputStream ByteString -> IO ()
-debugConnect p q = loop
-  where
-      loop = do
-          m <- S.read p
-          maybe (S.write Nothing q)
-                (trace (Prelude.show (length $ fromJust m)) const $ write m q >> loop)
-                m
-{-# INLINE debugConnect #-}
-
-      
 emptyState::IO RadioStore
 emptyState = do
     host <- getHostName

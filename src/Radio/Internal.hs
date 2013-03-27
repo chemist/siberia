@@ -31,6 +31,7 @@ import Data.Attoparsec.RFC2616 (lookupHeader)
 import Blaze.ByteString.Builder (flush, fromByteString)
 import qualified Blaze.ByteString.Builder as Builder
 import Blaze.ByteString.Builder.Internal.Buffer (allNewBuffersStrategy)
+import Data.IORef
 
 instance D.Allowed m => D.Storable m D.Radio where
     member r = do
@@ -104,6 +105,10 @@ instance D.Allowed m => D.Detalization m (Maybe D.Meta) where
     get radio = D.info radio >>= liftIO . getter D.meta
     set radio a = D.info radio >>= liftIO . setter (\y -> y { D.meta = a })
     
+instance D.Allowed m => D.Detalization m (Maybe (D.Buffer ByteString)) where
+    get radio = D.info radio >>= liftIO . getter D.buff
+    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.buff = a})
+    
 -- | создаем канал
 makeChannel::D.Radio -> D.Application ()
 makeChannel radio = do
@@ -115,11 +120,13 @@ makeChannel radio = do
           D.set radio $ (Nothing :: Maybe (Chan (Maybe ByteString)))
       whenGood radioStreamInput' = do
           chan <- liftIO $ newChan
+          buf' <- liftIO $ D.new 250 :: D.Application (D.Buffer ByteString)
+          D.set radio (Just buf')
           chanStreamOutput <- liftIO $ S.chanToOutput chan
           chanStreamInput  <- liftIO $ S.chanToInput  chan
-          devNull <- liftIO $ S.nullOutput
-          liftIO $ forkIO $ buffer 131072 radioStreamInput'  chanStreamOutput
-          liftIO $ forkIO $ S.connect chanStreamInput devNull
+          outputBuffer <- liftIO $ bufferToOutput buf'
+          liftIO $ forkIO $ buffer 4096 radioStreamInput'  chanStreamOutput
+          liftIO $ forkIO $ S.connect chanStreamInput outputBuffer
           D.set radio $ (Just chan :: Maybe (Chan (Maybe ByteString)))
           -- | @TODO save pid
           return ()
@@ -133,10 +140,20 @@ buffer size is os = do
     loop builder = do
         !m <- S.read is
         maybe (S.write Nothing builder)
-              (\x -> S.write (Just $ Builder.fromByteString x) builder >> loop builder)
+              (\x -> do
+                 S.write (Just $ Builder.fromByteString x) builder 
+                 loop builder)
               m
 {-# INLINE buffer #-}
-              
+
+bufferToOutput :: D.Buffer ByteString -> IO (OutputStream ByteString)
+bufferToOutput buf' = makeOutputStream f
+   where 
+   f Nothing = return $! ()
+   f (Just x) = D.update x buf'
+{-# INLINE bufferToOutput #-}
+   
+       
 -- | создаем соединение до стрим сервера
 makeConnect :: D.Radio -> D.Application (InputStream ByteString)
 makeConnect radio = do
@@ -197,8 +214,8 @@ setMeta radio i = do
             from <- liftIO $ S.readExactly metaInt i
             from' <- liftIO $ S.fromByteString from
             size <- liftIO $ S.fromByteString $ fromLen l
-            liftIO $ print $ "len " ++ show l
-            liftIO $ print $ "size " ++ (show $ fromLen l)
+--            liftIO $ print $ "len " ++ show l
+--            liftIO $ print $ "size " ++ (show $ fromLen l)
             metaInfo <- liftIO $ S.fromByteString mi
             output <- liftIO $ S.concatInputStreams [from', size, metaInfo, i]
             return output

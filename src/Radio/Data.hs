@@ -4,6 +4,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Radio.Data where
 
@@ -30,6 +31,7 @@ import Data.Binary (Binary, Get)
 import Data.IORef
 import Data.Cycle
 import qualified Data.Collections as Collections
+import Blaze.ByteString.Builder (Builder)
 
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
@@ -63,6 +65,7 @@ data RadioInfo x = RI { rid      :: x
                       , meta     :: Maybe Meta
                       , channel  :: Channel
                       , hostPort :: HostPort
+                      , buff     :: Maybe (Buffer ByteString)
                       }
                   | ById { rid :: x } deriving (Eq)
                       
@@ -75,7 +78,7 @@ instance Binary Radio where
     get = do
         r <- B.get :: Get RadioId
         u <- B.get :: Get Url
-        return $ RI r u Nothing [] Nothing Nothing Nothing 
+        return $ RI r u Nothing [] Nothing Nothing Nothing Nothing 
 
 data Store a = Store (MVar (Map RadioId (MVar a))) HostPort
 
@@ -87,13 +90,16 @@ type Web = ReaderT RadioStore Snap
 
 data Buffer a = Buffer { active :: IORef (Cycle Int)
                        , buf    :: IORef (Cycle (IORef a))
-                       }
+                       , size   :: IORef Int
+                       } deriving (Eq)
                        
 class Monoid a => RadioBuffer m a where
     -- ** создание буфера указанного размера
     new       :: Int -> IO (m a)
+    bufSize   :: m a -> IO Int
     -- ** циклический счетчик, номер блока для следующей записи
     current   :: m a -> IO Int
+    nextC     :: m a -> IO Int
     -- ** последний записанный блок
     lastBlock :: m a -> IO a
     -- ** запись очередного блока
@@ -101,13 +107,16 @@ class Monoid a => RadioBuffer m a where
     -- ** вернуть весь буфер в упорядоченном состоянии
     getAll    :: m a -> IO a
     
-instance Monoid a => RadioBuffer Buffer a where
+instance Monoid ByteString => RadioBuffer Buffer ByteString where
     new n = do
         l <-  sequence $ replicate n (newIORef empty :: Monoid a => IO (IORef a))
         l' <- newIORef $ Collections.fromList l
         p <- newIORef $ Collections.fromList [1 .. n]
-        return $ Buffer p l'
+        s <- newIORef n
+        return $ Buffer p l' s
+    bufSize = readIORef . size
     current x = readIORef (active x) >>= return . getValue
+    nextC   x = readIORef (active x) >>= return . rightValue
     lastBlock x = do
         position <- readIORef $ active x
         buf' <- readIORef $ buf x
@@ -117,10 +126,12 @@ instance Monoid a => RadioBuffer Buffer a where
         position <- readIORef $ active y
         buf' <- readIORef $ buf y
         modifyIORef (nthValue (getValue position) buf') $ \_ -> x
+        return ()
     getAll x = do
+        s <- bufSize x
         position <- readIORef $ active x
         buf' <- readIORef $ buf x
-        let res = takeLR 5 $ goLR (1 + getValue position) buf'
+        let res = takeLR s $ goLR (1 + getValue position) buf'
         mconcat <$> Prelude.mapM (\y -> readIORef y) res
         
         
@@ -140,8 +151,6 @@ class Storable m a where
     remove :: a -> m Bool
     list   :: m [a]
     info   :: a -> m (MVar a)
---    save   :: Prelude.FilePath -> m ()
---    load   :: Prelude.FilePath -> m ()
     
     
     
@@ -168,7 +177,7 @@ instance FromJSON Radio where
     parseJSON (Object x) = do
         rid' <- x .: "id"
         url' <- x .: "url"
-        return $ RI (addSlash $ RadioId rid') (Url url') Nothing [] Nothing Nothing Nothing
+        return $ RI (addSlash $ RadioId rid') (Url url') Nothing [] Nothing Nothing Nothing Nothing
 
 addSlash::RadioId -> RadioId
 addSlash (RadioId x) = RadioId $ concat ["/", x]
