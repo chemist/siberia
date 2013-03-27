@@ -7,7 +7,7 @@
 
 module Radio.Data where
 
-import           BasicPrelude                 hiding (concat)
+import           BasicPrelude                 hiding (concat, mapM)
 import           Prelude                      ()
 import qualified Prelude
 
@@ -23,10 +23,13 @@ import           Network.Socket               (HostName)
 import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
-import Control.Monad.Reader
+import Control.Monad.Reader hiding (mapM)
 import           Snap.Core           (Snap)
 import qualified Data.Binary as B
 import Data.Binary (Binary, Get)
+import Data.IORef
+import Data.Cycle
+import qualified Data.Collections as Collections
 
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
@@ -81,6 +84,38 @@ type RadioStore = Store Radio
 type Application = ReaderT RadioStore IO
 
 type Web = ReaderT RadioStore Snap 
+
+data Buffer a = Buffer { active :: IORef (Cycle Int)
+                       , buf    :: Cycle (IORef a)
+                       }
+                       
+class Monoid a => RadioBuffer m a where
+    new       :: IO (m a)
+    current   :: m a -> IO Int
+    lastBlock :: m a -> IO a
+    update    :: a -> m a -> IO ()
+    getAll    :: m a -> IO a
+    
+instance Monoid a => RadioBuffer Buffer a where
+    new = do
+        l <-  sequence $ replicate 5 (newIORef empty :: Monoid a => IO (IORef a))
+        p <- newIORef $ Collections.fromList [0 .. 4]
+        return $ Buffer p $ Collections.fromList l
+    current x = readIORef (active x) >>= return . getValue
+    lastBlock x = do
+        position <- readIORef $ active x
+        readIORef $ nthValue (getValue position) (buf x)
+    update x y = do
+        modifyIORef (active y) goRight
+        position <- readIORef $ active y
+        modifyIORef (nthValue (getValue position) (buf y)) $ \_ -> x
+    getAll x = do
+        position <- readIORef $ active x
+        let res = takeLR 5 $ goLR (1 + getValue position) (buf x)
+        mconcat <$> Prelude.mapM (\y -> readIORef y) res
+        
+        
+        
 
 runWeb :: Web a -> RadioStore -> Snap a
 runWeb m r = runReaderT m r
