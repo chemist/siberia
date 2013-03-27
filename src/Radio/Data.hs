@@ -86,32 +86,41 @@ type Application = ReaderT RadioStore IO
 type Web = ReaderT RadioStore Snap 
 
 data Buffer a = Buffer { active :: IORef (Cycle Int)
-                       , buf    :: Cycle (IORef a)
+                       , buf    :: IORef (Cycle (IORef a))
                        }
                        
 class Monoid a => RadioBuffer m a where
-    new       :: IO (m a)
+    -- ** создание буфера указанного размера
+    new       :: Int -> IO (m a)
+    -- ** циклический счетчик, номер блока для следующей записи
     current   :: m a -> IO Int
+    -- ** последний записанный блок
     lastBlock :: m a -> IO a
+    -- ** запись очередного блока
     update    :: a -> m a -> IO ()
+    -- ** вернуть весь буфер в упорядоченном состоянии
     getAll    :: m a -> IO a
     
 instance Monoid a => RadioBuffer Buffer a where
-    new = do
-        l <-  sequence $ replicate 5 (newIORef empty :: Monoid a => IO (IORef a))
-        p <- newIORef $ Collections.fromList [0 .. 4]
-        return $ Buffer p $ Collections.fromList l
+    new n = do
+        l <-  sequence $ replicate n (newIORef empty :: Monoid a => IO (IORef a))
+        l' <- newIORef $ Collections.fromList l
+        p <- newIORef $ Collections.fromList [1 .. n]
+        return $ Buffer p l'
     current x = readIORef (active x) >>= return . getValue
     lastBlock x = do
         position <- readIORef $ active x
-        readIORef $ nthValue (getValue position) (buf x)
+        buf' <- readIORef $ buf x
+        readIORef $ nthValue (getValue position) buf'
     update x y = do
         modifyIORef (active y) goRight
         position <- readIORef $ active y
-        modifyIORef (nthValue (getValue position) (buf y)) $ \_ -> x
+        buf' <- readIORef $ buf y
+        modifyIORef (nthValue (getValue position) buf') $ \_ -> x
     getAll x = do
         position <- readIORef $ active x
-        let res = takeLR 5 $ goLR (1 + getValue position) (buf x)
+        buf' <- readIORef $ buf x
+        let res = takeLR 5 $ goLR (1 + getValue position) buf'
         mconcat <$> Prelude.mapM (\y -> readIORef y) res
         
         
