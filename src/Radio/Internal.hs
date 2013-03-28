@@ -32,40 +32,9 @@ import Blaze.ByteString.Builder (flush, fromByteString)
 import qualified Blaze.ByteString.Builder as Builder
 import Blaze.ByteString.Builder.Internal.Buffer (allNewBuffersStrategy)
 import Data.IORef
-
-instance D.Allowed m => D.Storable m D.Radio where
-    member r = do
-        (D.Store x _) <- ask
-        liftIO $ withMVar x $ \y -> return $ (D.rid r) `Map.member` y
-    create r = do
-        (D.Store x hp) <- ask
-        let withPort = addHostPort hp r
-        is <- D.member r
-        if is 
-           then return (False, undefined)
-           else do
-               mv <- liftIO $ newMVar withPort
-               liftIO $ modifyMVar_ x $ \mi -> return $ Map.insert (D.rid r) mv mi
-               return (True, withPort)
-    remove r = do
-        (D.Store x _) <- ask
-        is <- D.member r
-        if is 
-           then do
-               liftIO $ modifyMVar_ x $ \mi -> return $ Map.delete (D.rid r) mi
-               return True
-           else return False
-    list = do
-        (D.Store x _) <- ask
-        liftIO $ withMVar x fromMVar
-        where 
-          fromMVar :: Map D.RadioId (MVar D.Radio) -> IO [D.Radio]
-          fromMVar y = Prelude.mapM (\(_, mv) -> withMVar mv return) $ Map.toList y
-    info a = do
-        (D.Store x _) <- ask
-        liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (D.rid a) y
-    -- | @TODO catch exception
-    -- 
+import Data.Cycle
+import qualified Data.Collections as Collections
+import Data.Text.Encoding as E
 
 save :: D.Allowed m => Prelude.FilePath -> m ()
 save path = do
@@ -78,37 +47,7 @@ load path = do
     R.mapM_ D.create $ (decode l :: [D.Radio])
     return ()        
         
-          
-addHostPort::D.HostPort -> D.Radio -> D.Radio
-addHostPort hp x = x { D.hostPort = hp }
-
--- | helpers
-getter ::(D.Radio -> a) -> MVar D.Radio -> IO a
-getter x y =  flip  withMVar (return . x)  y
-
-setter :: (D.Radio -> D.Radio) -> MVar D.Radio -> IO ()
-setter x y =  flip modifyMVar_ (return . x)  y
-
-instance D.Allowed m => D.Detalization m D.Url where
-    get radio = D.info radio >>= liftIO . getter D.url 
-    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.url = a })
-    
-instance D.Allowed m => D.Detalization m D.Headers where
-    get radio = D.info radio >>= liftIO . getter D.headers
-    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.headers = a })
-    
-instance D.Allowed m => D.Detalization m D.Channel where
-    get radio = D.info radio >>= liftIO . getter D.channel
-    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.channel = a })
-    
-instance D.Allowed m => D.Detalization m (Maybe D.Meta) where
-    get radio = D.info radio >>= liftIO . getter D.meta
-    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.meta = a })
-    
-instance D.Allowed m => D.Detalization m (Maybe (D.Buffer ByteString)) where
-    get radio = D.info radio >>= liftIO . getter D.buff
-    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.buff = a})
-    
+   
 -- | создаем канал
 makeChannel::D.Radio -> D.Application ()
 makeChannel radio = do
@@ -153,9 +92,14 @@ bufferToOutput buf' = makeOutputStream f
    f (Just x) = D.update x buf'
 {-# INLINE bufferToOutput #-}
    
+-- foldl1 (\x y -> if (x < y) then y else trace (show x) undefined) $ map (\x -> read x :: Integer) $ words a
        
 -- | создаем соединение до стрим сервера
 makeConnect :: D.Radio -> D.Application (InputStream ByteString)
+makeConnect (D.ById (D.RadioId "/test")) = do
+    i <- liftIO $ fakeInputStream
+    liftIO $ print "test radio stream"
+    return i
 makeConnect radio = do
    (i, o) <- openConnection radio
    getStream <- liftIO $ S.fromByteString "GET / HTTP/1.0\r\nIcy-MetaData: 1\r\n\r\n"
@@ -167,6 +111,22 @@ makeConnect radio = do
    liftIO $ print response
    liftIO $ print headers
    return resultStream
+   
+
+fakeRadioStream' :: [ByteString]
+fakeRadioStream' = BasicPrelude.map (\x -> mconcat [(E.encodeUtf8 . show) x , " "]) [1.. ] 
+
+fakeInputStream :: IO (S.InputStream ByteString)
+fakeInputStream = S.fromGenerator $ genStream fakeRadioStream'
+
+genStream :: [ByteString] -> S.Generator ByteString ()
+genStream x = do
+    let (start, stop) = splitAt 1024 x
+    S.yield $ mconcat start
+    liftIO $ threadDelay 1000000
+    genStream stop
+    
+
 
 -- | считываю metainfo с входного потока, сохраняю в состоянии
 getMeta :: D.Radio -> InputStream ByteString -> D.Application (InputStream ByteString)
@@ -240,5 +200,99 @@ openConnection radio = do
     where
        hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
 
+instance Monoid a => D.RadioBuffer D.Buffer a where
+    new n = do
+        l <-  sequence $ replicate n (newIORef empty :: Monoid a => IO (IORef a))
+        l' <- newIORef $ Collections.fromList l
+        p <- newIORef $ Collections.fromList [1 .. n]
+        s <- newIORef n
+        return $ D.Buffer p l' s
+    bufSize = readIORef . D.size
+    current x = readIORef (D.active x) >>= return . getValue
+    nextC   x = readIORef (D.active x) >>= return . rightValue
+    lastBlock x = do
+        position <- readIORef $ D.active x
+        buf' <- readIORef $ D.buf x
+        readIORef $ nthValue (getValue position) buf'
+    update x y = do
+        modifyIORef (D.active y) goRight
+        position <- readIORef $ D.active y
+        buf' <- readIORef $ D.buf y
+        modifyIORef (nthValue (getValue position) buf') $ \_ -> x
+        return ()
+    getAll x = do
+        s <- D.bufSize x
+        position <- readIORef $ D.active x
+        buf' <- readIORef $ D.buf x
+        let res = takeLR s $ goLR (1 + getValue position) buf'
+        mconcat <$> Prelude.mapM (\y -> readIORef y) res
+        
+ 
+instance D.Allowed m => D.Storable m D.Radio where
+    member (D.ById (D.RadioId "/test")) = return True
+    member r = do
+        (D.Store x _) <- ask
+        liftIO $ withMVar x $ \y -> return $ (D.rid r) `Map.member` y
+    create r = do
+        (D.Store x hp) <- ask
+        let withPort = addHostPort hp r
+        is <- D.member r
+        if is 
+           then return (False, undefined)
+           else do
+               mv <- liftIO $ newMVar withPort
+               liftIO $ modifyMVar_ x $ \mi -> return $ Map.insert (D.rid r) mv mi
+               return (True, withPort)
+    remove r = do
+        (D.Store x _) <- ask
+        is <- D.member r
+        if is 
+           then do
+               liftIO $ modifyMVar_ x $ \mi -> return $ Map.delete (D.rid r) mi
+               return True
+           else return False
+    list = do
+        (D.Store x _) <- ask
+        liftIO $ withMVar x fromMVar
+        where 
+          fromMVar :: Map D.RadioId (MVar D.Radio) -> IO [D.Radio]
+          fromMVar y = Prelude.mapM (\(_, mv) -> withMVar mv return) $ Map.toList y
+    info a = do
+        (D.Store x _) <- ask
+        liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (D.rid a) y
+    -- | @TODO catch exception
+    -- 
 
+
+          
+addHostPort::D.HostPort -> D.Radio -> D.Radio
+addHostPort hp x = x { D.hostPort = hp }
+
+-- | helpers
+getter ::(D.Radio -> a) -> MVar D.Radio -> IO a
+getter x y =  flip  withMVar (return . x)  y
+
+setter :: (D.Radio -> D.Radio) -> MVar D.Radio -> IO ()
+setter x y =  flip modifyMVar_ (return . x)  y
+
+instance D.Allowed m => D.Detalization m D.Url where
+    get radio = D.info radio >>= liftIO . getter D.url 
+    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.url = a })
+    
+instance D.Allowed m => D.Detalization m D.Headers where
+    get radio = D.info radio >>= liftIO . getter D.headers
+    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.headers = a })
+    
+instance D.Allowed m => D.Detalization m D.Channel where
+    get radio = D.info radio >>= liftIO . getter D.channel
+    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.channel = a })
+    
+instance D.Allowed m => D.Detalization m (Maybe D.Meta) where
+    get radio = D.info radio >>= liftIO . getter D.meta
+    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.meta = a })
+    
+instance D.Allowed m => D.Detalization m (Maybe (D.Buffer ByteString)) where
+    get radio = D.info radio >>= liftIO . getter D.buff
+    set radio a = D.info radio >>= liftIO . setter (\y -> y { D.buff = a})
+ 
 

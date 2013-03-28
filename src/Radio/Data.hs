@@ -36,25 +36,11 @@ import Blaze.ByteString.Builder (Builder)
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
 newtype Meta = Meta (ByteString, Int) deriving (Show, Ord, Eq)
+
 type Headers = [Header]
 type HostPort = Maybe (HostName, Int)
 type Channel = Maybe (Chan (Maybe ByteString))
-
-instance ToJSON RadioId where
-    toJSON (RadioId x) = toJSON x
-
-instance ToJSON Url where
-    toJSON (Url x) = toJSON x
-    
-instance Binary Url where
-    put (Url x) = B.put x
-    get = Url <$> B.get
-    
-instance Binary RadioId where
-    put (RadioId x) = B.put x
-    get = RadioId <$> B.get
-    
-
+   
 port :: Int
 port = 2000
 
@@ -70,16 +56,6 @@ data RadioInfo x = RI { rid      :: x
                   | ById { rid :: x } deriving (Eq)
                       
 type Radio = RadioInfo RadioId
-
-instance Binary Radio where
-    put x = do
-        B.put $ rid x
-        B.put $ url x
-    get = do
-        r <- B.get :: Get RadioId
-        u <- B.get :: Get Url
-        return $ RI r u Nothing [] Nothing Nothing Nothing Nothing 
-
 data Store a = Store (MVar (Map RadioId (MVar a))) HostPort
 
 type RadioStore = Store Radio
@@ -106,36 +82,6 @@ class Monoid a => RadioBuffer m a where
     update    :: a -> m a -> IO ()
     -- ** вернуть весь буфер в упорядоченном состоянии
     getAll    :: m a -> IO a
-    
-instance Monoid ByteString => RadioBuffer Buffer ByteString where
-    new n = do
-        l <-  sequence $ replicate n (newIORef empty :: Monoid a => IO (IORef a))
-        l' <- newIORef $ Collections.fromList l
-        p <- newIORef $ Collections.fromList [1 .. n]
-        s <- newIORef n
-        return $ Buffer p l' s
-    bufSize = readIORef . size
-    current x = readIORef (active x) >>= return . getValue
-    nextC   x = readIORef (active x) >>= return . rightValue
-    lastBlock x = do
-        position <- readIORef $ active x
-        buf' <- readIORef $ buf x
-        readIORef $ nthValue (getValue position) buf'
-    update x y = do
-        modifyIORef (active y) goRight
-        position <- readIORef $ active y
-        buf' <- readIORef $ buf y
-        modifyIORef (nthValue (getValue position) buf') $ \_ -> x
-        return ()
-    getAll x = do
-        s <- bufSize x
-        position <- readIORef $ active x
-        buf' <- readIORef $ buf x
-        let res = takeLR s $ goLR (1 + getValue position) buf'
-        mconcat <$> Prelude.mapM (\y -> readIORef y) res
-        
-        
-        
 
 runWeb :: Web a -> RadioStore -> Snap a
 runWeb m r = runReaderT m r
@@ -151,8 +97,6 @@ class Storable m a where
     remove :: a -> m Bool
     list   :: m [a]
     info   :: a -> m (MVar a)
-    
-    
     
 class Detalization m a where
     get :: Radio -> m a
@@ -182,3 +126,29 @@ instance FromJSON Radio where
 addSlash::RadioId -> RadioId
 addSlash (RadioId x) = RadioId $ concat ["/", x]
    
+
+
+instance ToJSON RadioId where
+    toJSON (RadioId x) = toJSON x
+
+instance ToJSON Url where
+    toJSON (Url x) = toJSON x
+    
+instance Binary Url where
+    put (Url x) = B.put x
+    get = Url <$> B.get
+    
+instance Binary RadioId where
+    put (RadioId x) = B.put x
+    get = RadioId <$> B.get
+ 
+instance Binary Radio where
+    put x = do
+        B.put $ rid x
+        B.put $ url x
+    get = do
+        r <- B.get :: Get RadioId
+        u <- B.get :: Get Url
+        return $ RI r u Nothing [] Nothing Nothing Nothing Nothing 
+
+
