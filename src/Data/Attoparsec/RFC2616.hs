@@ -14,6 +14,7 @@ module Data.Attoparsec.RFC2616
     , lowerHeader
     , lookupHeader
     , parseUrl
+    , parsePath
     ) where
 
 import Control.Applicative
@@ -57,6 +58,14 @@ parseUrl = withPort <|> withoutPort
             hostname <- "http://" *> P.takeWhile (/= 47)
             takeTill P8.isEndOfLine
             return (hostname, "80")
+            
+parsePath ::Parser B.ByteString
+parsePath = do
+    "http://" *> P.takeWhile (/= 47)
+    path <- takeTill P8.isEndOfLine
+    case path of
+         "" -> pure "/"
+         _ ->  return path
     
 data Header = Header {
       headerName  :: !B.ByteString
@@ -80,8 +89,8 @@ data Response = Response {
 
 responseLine :: Parser Response
 responseLine = do
-  "ICY" <* char8 ' '
-  code <- P.takeWhile isDigit_w8 <* char8 ' '
+  "HTTP/1.1" <|> "ICY" <|> "HTTP/1.0" <|> "HTTP" 
+  code <- char8 ' ' *> P.takeWhile isDigit_w8 <* char8 ' '
   msg <- P.takeTill P8.isEndOfLine <* endOfLine
   return $! Response code msg
 

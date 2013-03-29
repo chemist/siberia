@@ -29,7 +29,7 @@ import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
 
-import           Data.Attoparsec.RFC2616      (Request (..), request)
+import           Data.Attoparsec.RFC2616      (Request (..), request, response)
 
 import Control.Monad.Reader
 import           Radio.Data
@@ -136,7 +136,7 @@ successRespo = concat [ "ICY 200 OK\r\n"
                       , "icy-url: http://localhost:2000/big \r\n"
                       , "icy-genre: Swing  Big Band  Jazz  Blues\r\n"
                       , "icy-pub: 1\r\n"
-                      , "icy-metaint: 8192\n"
+                      , "icy-metaint: 16384\n"
                       , "icy-br: 128\r\n\r\n"
                       ]
 
@@ -154,5 +154,18 @@ testUrl2 = "http://bigblueswing.com:2002/asdf"
 
 testUrl3 ::ByteString
 testUrl3 = "http://bigblueswing.com/asdf"
+
+testreq :: ByteString
+testreq = concat [ "HTTP/1.0 200 OK\r\n"
+                 , "Content-Type:audio/mpeg\r\n"
+                 , "icy-br:128\r\n"
+                 , "icy-description:UNC Charlotte's Radio Station\r\n"
+                 , "icy-genre:College Progressive\r\n"
+                 , "icy-name:Radio Free Charlotte\r\n"
+                 , "icy-pub:1\r\n"
+                 , "icy-url:http://rfclive.uncc.edu:8000/listen.m3u\r\n"
+                 , "Server:Icecast 2.3.2\r\n"
+                 , "Cache-Control: no-cache\r\n\r\n"
+                 ]
 
 

@@ -102,7 +102,14 @@ makeConnect (D.ById (D.RadioId "/test")) = do
     return i
 makeConnect radio = do
    (i, o) <- openConnection radio
-   getStream <- liftIO $ S.fromByteString "GET / HTTP/1.0\r\nIcy-MetaData: 1\r\n\r\n"
+   D.Url u <- D.get radio
+   let Right path = parseOnly parsePath u
+       req = mconcat ["GET ", path, " HTTP/1.0\r\nicy-metadata: 1\r\n\r\n"]
+   liftIO $ print "url from radio"
+   liftIO $ print u
+   liftIO $ print "request to server"
+   liftIO $ print req
+   getStream <- liftIO $ S.fromByteString req
    liftIO $ S.connect getStream o
    (response, headers) <- liftIO $ S.parseFromStream response i
    -- | @TODO обработать исключения
@@ -155,7 +162,8 @@ getMeta radio i = do
             liftIO $ print metaInfo
             D.set radio (Just $ D.Meta (metaInfo, len)) 
             predicate <- liftIO $ S.fromByteString from
-            output <- liftIO $ S.appendInputStream predicate i 
+            liftIO $ print $ BS.take 20 from
+            output <- liftIO $ S.concatInputStreams [predicate, i] 
             return output
             
 
@@ -170,14 +178,15 @@ setMeta radio i = do
     
         setMetaToOutputStream :: InputStream ByteString -> D.Meta -> D.Application (InputStream ByteString)
         setMetaToOutputStream i (D.Meta (mi,l)) = do
-            let metaInt = 8192 
-            from <- liftIO $ S.readExactly metaInt i
-            from' <- liftIO $ S.fromByteString from
-            size <- liftIO $ S.fromByteString $ fromLen l
---            liftIO $ print $ "len " ++ show l
---            liftIO $ print $ "size " ++ (show $ fromLen l)
-            metaInfo <- liftIO $ S.fromByteString mi
-            output <- liftIO $ S.concatInputStreams [from', size, metaInfo, i]
+            let metaInt = 16384 
+            from <- liftIO $ S.readExactly metaInt  i
+            let start = mconcat [ from , (fromLen l), mi ]
+            liftIO $ print $ "len " ++ show l
+            liftIO $ print $ "size " ++ (show $ BS.length $ fromLen l)
+            liftIO $ print mi
+            liftIO $ print $ show $ BS.length mi
+            metaInfo <- liftIO $ S.fromByteString start
+            output <- liftIO $ S.concatInputStreams [metaInfo, i]
             return output
             
         
