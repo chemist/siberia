@@ -27,7 +27,6 @@ import qualified Control.Monad.Reader as R
 import  Radio.Data ()
 import qualified Radio.Data as D
 import Data.Binary
-import Data.Attoparsec.RFC2616 (lookupHeader)
 import Blaze.ByteString.Builder (flush, fromByteString)
 import qualified Blaze.ByteString.Builder as Builder
 import Blaze.ByteString.Builder.Internal.Buffer (allNewBuffersStrategy)
@@ -123,7 +122,7 @@ genStream :: [ByteString] -> S.Generator ByteString ()
 genStream x = do
     let (start, stop) = splitAt 1024 x
     S.yield $ mconcat start
-    liftIO $ threadDelay 1000000
+    liftIO $ threadDelay 10000
     genStream stop
     
 
