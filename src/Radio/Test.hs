@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Radio.Test where
+module Main where
 
-import Main
 import Radio.Data hiding (get)
 import Radio.Internal
 
@@ -52,7 +51,7 @@ fun state (Just x) = do
                return ()
              else do 
                print x
-               modifyIORef state (+1)
+               modifyIORef state (\_ -> x)
   
 parserStream :: Parser (Maybe Integer)
 parserStream = (endOfInput >> pure Nothing ) <|> (Just <$> ( decimal <* space))

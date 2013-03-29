@@ -58,7 +58,7 @@ makeChannel radio = do
           D.set radio $ (Nothing :: Maybe (Chan (Maybe ByteString)))
       whenGood radioStreamInput' = do
           chan <- liftIO $ newChan
-          buf' <- liftIO $ D.new 250 :: D.Application (D.Buffer ByteString)
+          buf' <- liftIO $ D.new 100 :: D.Application (D.Buffer ByteString)
           D.set radio (Just buf')
           chanStreamOutput <- liftIO $ S.chanToOutput chan
           chanStreamInput  <- liftIO $ S.chanToInput  chan
@@ -91,12 +91,13 @@ bufferToOutput buf' = makeOutputStream f
    f (Just x) = D.update x buf'
 {-# INLINE bufferToOutput #-}
    
--- foldl1 (\x y -> if (x < y) then y else trace (show x) undefined) $ map (\x -> read x :: Integer) $ words a
-       
 -- | создаем соединение до стрим сервера
 makeConnect :: D.Radio -> D.Application (InputStream ByteString)
 makeConnect (D.ById (D.RadioId "/test")) = do
     i <- liftIO $ fakeInputStream
+    liftIO $ print "test radio stream"
+    liftIO $ print "test radio stream"
+    liftIO $ print "test radio stream"
     liftIO $ print "test radio stream"
     return i
 makeConnect radio = do
@@ -122,7 +123,7 @@ genStream :: [ByteString] -> S.Generator ByteString ()
 genStream x = do
     let (start, stop) = splitAt 1024 x
     S.yield $ mconcat start
-    liftIO $ threadDelay 10000
+    liftIO $ threadDelay 100000
     genStream stop
     
 
