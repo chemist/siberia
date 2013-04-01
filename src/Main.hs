@@ -109,10 +109,13 @@ makeClient oS radio = do
              liftIO $ print $ "from birst" ++ (Prelude.show $ length birst)
              birst' <- liftIO $ S.fromByteString birst
              withoutMeta <- liftIO $ S.concatInputStreams [ birst', input ]
-             withMeta <- setMeta radio withoutMeta
---              liftIO $ S.supply start oS 
-             allInput <- liftIO $ S.concatInputStreams [ start, withMeta ]
-             fin <- liftIO $ try $ S.connect allInput oS  :: Application (Either SomeException ())
+             state <- ask
+             let getMeta :: IO (Maybe Meta)
+                 getMeta = runReaderT (get radio) state
+             liftIO $ print "supply start"
+             liftIO $ S.supply start oS 
+             liftIO $ print "supply end"
+             fin <- liftIO $ try $ connectWithAddMetaAndBuffering (Just 8192) getMeta 4096 withoutMeta oS  :: Application (Either SomeException ())
              either whenError whenGood fin
              liftIO $ print "make finally work"
          Nothing -> liftIO $ S.write (Just "ICY 423 Locked\r\n") oS
@@ -120,7 +123,6 @@ makeClient oS radio = do
       whenError s = liftIO $ print $ "catched: " ++ show s
       whenGood _ = return ()
       
-
 emptyState::IO RadioStore
 emptyState = do
     host <- getHostName
@@ -136,7 +138,7 @@ successRespo = concat [ "ICY 200 OK\r\n"
                       , "icy-url: http://localhost:2000/big \r\n"
                       , "icy-genre: Swing  Big Band  Jazz  Blues\r\n"
                       , "icy-pub: 1\r\n"
-                      , "icy-metaint: 16384\n"
+                      , "icy-metaint: 8192\n"
                       , "icy-br: 128\r\n\r\n"
                       ]
 

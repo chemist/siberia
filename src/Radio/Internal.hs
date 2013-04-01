@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FunctionalDependencies #-}
-module Radio.Internal (module Radio.Data, makeChannel, load, save, setMeta, buffer) where
+module Radio.Internal (module Radio.Data, getMetaInfo, makeChannel, load, save, connectWithRemoveMetaAndBuffering, connectWithAddMetaAndBuffering) where
 
 import           BasicPrelude
 import           Control.Concurrent           hiding (yield)
@@ -50,6 +50,7 @@ load path = do
 -- | создаем канал
 makeChannel::D.Radio -> D.Application ()
 makeChannel radio = do
+    liftIO $ print "start make channel"
     radioStreamInput <- try $ makeConnect radio :: D.Application (Either SomeException (InputStream ByteString))
     either whenError whenGood radioStreamInput
     where 
@@ -57,32 +58,160 @@ makeChannel radio = do
           liftIO $ print $ "Error when connection: " ++ show x 
           D.set radio $ (Nothing :: Maybe (Chan (Maybe ByteString)))
       whenGood radioStreamInput' = do
+          liftIO $ print "start good"
+          state <- ask
+          let saveMeta :: Maybe D.Meta -> IO ()
+              saveMeta x = runReaderT (D.set radio x) state
           chan <- liftIO $ newChan
           buf' <- liftIO $ D.new 100 :: D.Application (D.Buffer ByteString)
           D.set radio (Just buf')
+          metaInt <- unpackMeta <$> (lookupHeader "icy-metaint" <$> D.get radio) :: D.Application (Maybe Int)
+          liftIO $ print "have meta int"
+          liftIO $ print metaInt
           chanStreamOutput <- liftIO $ S.chanToOutput chan
           chanStreamInput  <- liftIO $ S.chanToInput  chan
           outputBuffer <- liftIO $ bufferToOutput buf'
-          liftIO $ forkIO $ buffer 4096 radioStreamInput'  chanStreamOutput
+          liftIO $ print "have output buffer"
+          liftIO $ forkIO $ connectWithRemoveMetaAndBuffering metaInt saveMeta  4096 radioStreamInput'  chanStreamOutput
           liftIO $ forkIO $ S.connect chanStreamInput outputBuffer
           D.set radio $ (Just chan :: Maybe (Chan (Maybe ByteString)))
           -- | @TODO save pid
           return ()
+      unpackMeta :: [ByteString] -> Maybe Int
+      unpackMeta meta = do
+          m <- listToMaybe meta
+          (a,_) <- C.readInt m
+          return a
           
-buffer::Int -> InputStream ByteString -> OutputStream ByteString -> IO ()
-buffer size is os = do
-    let strategy = allNewBuffersStrategy size
+          
+connectWithRemoveMetaAndBuffering ::Maybe Int                -- ^ meta int
+                                  -> (Maybe D.Meta -> IO ())   -- ^ запись мета информации в состояние
+                                  -> Int                      -- ^ размер чанка для буферизированного вывода
+                                  -> InputStream ByteString   -- ^ входной поток
+                                  -> OutputStream ByteString  -- ^ выходной поток
+                                  -> IO ()                    
+connectWithRemoveMetaAndBuffering Nothing _ buffSize is os = do
+    let strategy = allNewBuffersStrategy buffSize
     builder <- S.builderStreamWith strategy os
-    loop builder
+    loop1 builder 
     where 
-    loop builder = do
+    loop1 builder = do
         !m <- S.read is
         maybe (S.write Nothing builder)
               (\x -> do
                  S.write (Just $ Builder.fromByteString x) builder 
-                 loop builder)
+                 loop1 builder)
               m
-{-# INLINE buffer #-}
+connectWithRemoveMetaAndBuffering (Just metaInt) saveMeta buffSize is os = do
+    let strategy = allNewBuffersStrategy buffSize
+    builder <- S.builderStreamWith strategy os
+    loop1 builder metaInt metaInt
+    where 
+    loop1 builder metaInt' whereNextMetaInt = do
+        !m <- S.read is
+        maybe (S.write Nothing builder)
+              (\x -> do
+                 let chunkSize = BS.length x
+                 if chunkSize <= whereNextMetaInt 
+                    then do
+                        S.write (Just $ Builder.fromByteString x) builder 
+                        loop1 builder metaInt' (whereNextMetaInt - chunkSize)
+                    else do
+                        let (start, metaSize, meta', end, nextMetaInt) = getMetaInfo metaInt' whereNextMetaInt x
+                        S.write (Just $ Builder.fromByteString start) builder
+                        S.write (Just $ Builder.fromByteString end) builder
+                        when (metaSize /= 0) $ saveMeta $ Just $ D.Meta (meta', metaSize)
+                        loop1 builder metaInt' nextMetaInt
+                        )
+              m
+{-# INLINE connectWithRemoveMetaAndBuffering #-}
+
+-- | парсим мета информацию
+getMetaInfo :: Int -> Int -> ByteString -> (ByteString, Int, ByteString, ByteString, Int)
+getMetaInfo metaInt'' count bs = 
+  let (start, end) = BS.splitAt count bs
+      metaSize = toLen $ BS.take 1 end
+      meta' = BS.tail $ BS.take (metaSize + 1) end
+      end' = BS.drop (metaSize + 1) end
+      count' = metaInt'' - BS.length end'
+  in (start, metaSize, meta', end', count')
+                               
+
+toLen :: ByteString -> Int
+toLen x = let [w] = BS.unpack x
+          in 16 * fromIntegral w
+          
+connectWithAddMetaAndBuffering :: Maybe Int   -- ^ meta int
+                               ->  IO (Maybe D.Meta) -- ^ получить мета информацию
+                               ->  Int   -- ^ размер буфера
+                               ->  InputStream ByteString
+                               ->  OutputStream ByteString
+                               ->  IO ()
+connectWithAddMetaAndBuffering Nothing _ buffSize is os = do
+    let strategy = allNewBuffersStrategy buffSize
+    builder <- S.builderStreamWith strategy os
+    loop2 builder 
+    where 
+    loop2 builder = do
+        !m <- S.read is
+        maybe (S.write Nothing builder)
+              (\x -> do
+                 S.write (Just $ Builder.fromByteString x) builder 
+                 loop2 builder)
+              m
+connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
+    let strategy = allNewBuffersStrategy buffSize
+    builder <- S.builderStreamWith strategy os
+    loop2 builder metaInt metaInt ""
+    where 
+    fromLen :: Int -> ByteString
+    fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16) 
+    
+    loop2 builder metaInt' whereNextMetaInt oldMeta = do
+        !m <- S.read is
+        maybe (S.write Nothing builder)
+              (\x -> do
+                 let chunkSize = BS.length x
+                 print "size"
+                 print $ show whereNextMetaInt ++ "next"
+                 print $ show chunkSize ++ "chunk"
+                 meta' <- getMeta
+                 case (whereNextMetaInt >= chunkSize, meta') of
+                      (True, _) -> do
+                          print "first"
+                          S.write (Just $ Builder.fromByteString x) builder 
+                          loop2 builder metaInt' (whereNextMetaInt - chunkSize) oldMeta
+                -- @TODO неправильно, переписать
+                      (False, Nothing) -> do
+                          print "second"
+                          let (start, end) = BS.splitAt whereNextMetaInt x
+                              endSize = BS.length end
+                          S.write (Just $ Builder.fromByteString start) builder
+                          S.write (Just $ Builder.fromByteString $ BS.pack $ [toEnum 0]) builder
+                          S.write (Just $ Builder.fromByteString end) builder
+                          loop2 builder metaInt' (metaInt' - (endSize - 1 )) ""
+                      (False, Just (D.Meta (meta'', metaSize))) -> do
+                          print "third"
+                          let (start, end) = BS.splitAt whereNextMetaInt x
+                              endSize = BS.length end
+                          S.write (Just $ Builder.fromByteString start) builder
+                          if meta'' /= oldMeta 
+                             then do
+                                 print "third 1"
+                                 S.write (Just $ Builder.fromByteString $ fromLen metaSize) builder
+                                 S.write (Just $ Builder.fromByteString meta'') builder
+                                 S.write (Just $ Builder.fromByteString end) builder
+                                 loop2 builder metaInt' (metaInt' - (endSize + metaSize + 1)) meta''
+                             else do
+                                 print "third 2"
+                                 S.write (Just $ Builder.fromByteString $ BS.pack $ [toEnum 0]) builder
+                                 S.write (Just $ Builder.fromByteString end) builder
+                                 loop2 builder metaInt' (metaInt' - (endSize + 1)) meta''
+                        )
+              m
+
+{-# INLINE connectWithAddMetaAndBuffering #-}
+                               
 
 bufferToOutput :: D.Buffer ByteString -> IO (OutputStream ByteString)
 bufferToOutput buf' = makeOutputStream f
@@ -114,10 +243,10 @@ makeConnect radio = do
    (response, headers) <- liftIO $ S.parseFromStream response i
    -- | @TODO обработать исключения
    D.set radio headers
-   resultStream <- getMeta radio i
    liftIO $ print response
    liftIO $ print headers
-   return resultStream
+   liftIO $ print "makeConnect end"
+   return i
    
 
 fakeRadioStream' :: [ByteString]
@@ -134,62 +263,6 @@ genStream x = do
     genStream stop
     
 
-
--- | считываю metainfo с входного потока, сохраняю в состоянии
-getMeta :: D.Radio -> InputStream ByteString -> D.Application (InputStream ByteString)
-getMeta radio i = do
-    metaHeader <- lookupHeader "icy-metaint" <$> D.get radio :: D.Application [ByteString]
-    liftIO $ print $ "found meta" ++ show metaHeader 
-    let metaInt = unpackMeta metaHeader
-    maybe (return i) (getMetaFromStream i) metaInt
-    where
-    
-        toLen :: ByteString -> Int
-        toLen x = let [w] = BS.unpack x
-                  in 16 * fromIntegral w
-                  
-        unpackMeta :: [ByteString] -> Maybe Int
-        unpackMeta meta = do
-            m <- listToMaybe meta
-            (a,_) <- C.readInt m
-            return a
-            
-        getMetaFromStream :: InputStream ByteString -> Int -> D.Application (InputStream ByteString)
-        getMetaFromStream i mi = do
-            from <- liftIO $ S.readExactly mi i
-            len <- liftIO $ toLen <$> S.readExactly 1 i
-            metaInfo <- liftIO $ S.readExactly len i
-            liftIO $ print metaInfo
-            D.set radio (Just $ D.Meta (metaInfo, len)) 
-            predicate <- liftIO $ S.fromByteString from
-            liftIO $ print $ BS.take 20 from
-            output <- liftIO $ S.concatInputStreams [predicate, i] 
-            return output
-            
-
--- | вставляю metainfo в выходной поток
-setMeta :: D.Radio -> InputStream ByteString -> D.Application (InputStream ByteString)
-setMeta radio i = do
-    metaInfo <- D.get radio :: D.Application (Maybe D.Meta)
-    maybe (return i) (setMetaToOutputStream i) metaInfo
-    where
-        fromLen :: Int -> ByteString
-        fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16) 
-    
-        setMetaToOutputStream :: InputStream ByteString -> D.Meta -> D.Application (InputStream ByteString)
-        setMetaToOutputStream i (D.Meta (mi,l)) = do
-            let metaInt = 16384 
-            from <- liftIO $ S.readExactly metaInt  i
-            let start = mconcat [ from , (fromLen l), mi ]
-            liftIO $ print $ "len " ++ show l
-            liftIO $ print $ "size " ++ (show $ BS.length $ fromLen l)
-            liftIO $ print mi
-            liftIO $ print $ show $ BS.length mi
-            metaInfo <- liftIO $ S.fromByteString start
-            output <- liftIO $ S.concatInputStreams [metaInfo, i]
-            return output
-            
-        
 -- | открываем соединение до стрим сервера 
 openConnection :: D.Radio -> D.Application (InputStream ByteString, OutputStream ByteString)
 openConnection radio = do
