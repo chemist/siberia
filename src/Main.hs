@@ -1,6 +1,5 @@
 -- | Simple shoutcast server for streaming audio broadcast.
 
-{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main where
@@ -8,14 +7,13 @@ module Main where
 import           BasicPrelude                 hiding (concat, length, splitAt)
 import qualified Prelude
 
-import           Control.Concurrent           (myThreadId, forkIO, newMVar, threadDelay)
-import Control.Concurrent.Chan(dupChan)
+import           Control.Concurrent           (forkIO, myThreadId, newMVar,
+                                               threadDelay)
+import           Control.Concurrent.Chan      (dupChan)
 
-import           Data.ByteString              (concat, length, splitAt)
+import           Data.ByteString              (concat, length)
 
-import           Data.Map                     (singleton, empty)
-import qualified Data.Map  as Map
-import           Data.Maybe                   (fromJust)
+import qualified Data.Map                     as Map
 
 import           Network.BSD                  (getHostName)
 import           Network.Socket               (Family (AF_INET),
@@ -29,66 +27,59 @@ import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
 
-import           Data.Attoparsec.RFC2616      (Request (..), request, response)
+import           Data.Attoparsec.RFC2616      (Request (..), request)
 
-import Control.Monad.Reader
+import           Control.Monad.Reader
 import           Radio.Data
 import           Radio.Internal
 import           Radio.Web                    (web)
-import           Snap.Http.Server    (quickHttpServe)
-
-import System.Posix.Signals
-import System.Posix.Process(exitImmediately)
-import System.Exit(ExitCode(ExitSuccess))
-import Blaze.ByteString.Builder (Builder, toByteString)
-import Debug.Trace
-
+import           Snap.Http.Server             (quickHttpServe)
 
 main::IO ()
 main = do
-    mainId <- myThreadId
+--     mainId <- myThreadId
     state <- emptyState
     -- | start web application
-    forkIO $ quickHttpServe $ runWeb web state
-    try $ runReaderT (load "radiobase") state :: IO (Either SomeException ())
-    -- | open socket 
+    void . forkIO $ quickHttpServe $ runWeb web state
+    _ <- try $ runReaderT (load "radiobase") state :: IO (Either SomeException ())
+    -- | open socket
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1
     bindSocket sock (SockAddrInet (toEnum port) 0)
     listen sock 100
     -- | allways accept connection
-    forever $ do
+    void . forever $ do
         (accepted, _) <- accept sock
         connected <- socketToStreams accepted
         forkIO $ runReaderT (connectHandler connected  `finally`  (liftIO $ sClose accepted)) state
     sClose sock
     return ()
-    
+
 connectHandler::(InputStream ByteString, OutputStream ByteString) -> Application ()
 connectHandler (iS, oS) = do
     sized <- liftIO $ S.throwIfProducesMoreThan 2048 iS
     result <- try $ liftIO $ S.parseFromStream request sized :: Application (Either SomeException (Request, Headers))
     either whenError whenGood result
-    
+
     where
-    whenError s 
+    whenError s
       | showType s == "TooManyBytesReadException" = liftIO $ S.write (Just "ICY 414 Request-URI Too Long\r\n") oS
       | otherwise                                = liftIO $ S.write (Just "ICY 400 Bad Request\r\n") oS
-    whenGood (request, headers) = do
-        let channel = ById (RadioId $ requestUri request)
-        is <- member $ channel
+    whenGood (request', headers') = do
+        let channel' = ById (RadioId $ requestUri request')
+        is <- member $ channel'
         if is
           then do
-             liftIO $ print "make connection"
-             liftIO $ print request
-             liftIO $ print headers
-             makeClient oS channel 
+             liftIO $ print ("make connection"::String)
+             liftIO $ print request'
+             liftIO $ print headers'
+             makeClient oS channel'
           else do
            -- | unknown rid
-             liftIO $ print request
-             liftIO $ print headers
+             liftIO $ print request'
+             liftIO $ print headers'
              liftIO $ S.write (Just "ICY 404 Not Found\r\n") oS
-          
+
     showType :: SomeException -> String
     showType = Prelude.show . typeOf
 
@@ -98,11 +89,11 @@ makeClient oS radio = do
     when (isNothing chan) $ do
         makeChannel radio
         liftIO $ threadDelay 1000000
-    chan <- get radio :: Application Channel
-    case chan of
-         Just chan' -> do
+    chan' <- get radio :: Application Channel
+    case chan' of
+         Just chan'' -> do
              Just buf' <- get radio :: Application (Maybe (Buffer ByteString))
-             duplicate <- liftIO $ dupChan chan'
+             duplicate <- liftIO $ dupChan chan''
              start <- liftIO $ S.fromByteString successRespo
              input <- liftIO $ S.chanToInput duplicate
              birst <- liftIO $ getAll buf'
@@ -113,7 +104,7 @@ makeClient oS radio = do
              let getMeta :: IO (Maybe Meta)
                  getMeta = runReaderT (get radio) state
              liftIO $ print "supply start"
-             liftIO $ S.supply start oS 
+             liftIO $ S.supply start oS
              liftIO $ print "supply end"
              fin <- liftIO $ try $ connectWithAddMetaAndBuffering (Just 8192) getMeta 4096 withoutMeta oS  :: Application (Either SomeException ())
              either whenError whenGood fin
@@ -122,13 +113,14 @@ makeClient oS radio = do
     where
       whenError s = liftIO $ print $ "catched: " ++ show s
       whenGood _ = return ()
-      
+
+
 emptyState::IO RadioStore
 emptyState = do
     host <- getHostName
     a <- newMVar Map.empty
     return $ Store a (Just (host, 2000))
-    
+
 successRespo :: ByteString
 successRespo = concat [ "ICY 200 OK\r\n"
                       , "icy-notice1: Haskell shoucast splitter\r\n"
@@ -142,7 +134,7 @@ successRespo = concat [ "ICY 200 OK\r\n"
                       , "icy-br: 128\r\n\r\n"
                       ]
 
-   
+
 -- big = RI (RadioId "/big") (Url "http://radio.bigblueswing.com:8002") Nothing [] Nothing Nothing
 
 testUrl :: ByteString
