@@ -3,7 +3,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE TypeSynonymInstances   #-}
-module Radio.Internal (module Radio.Data, getMetaInfo, makeChannel, load, save, connectWithRemoveMetaAndBuffering, connectWithAddMetaAndBuffering) where
+module Radio.Internal (module Radio.Data, makeChannel, load, save, connectWithRemoveMetaAndBuffering, connectWithAddMetaAndBuffering) where
 
 import           BasicPrelude
 import           Control.Concurrent                       hiding (yield)
@@ -64,7 +64,7 @@ makeChannel radio = do
           let saveMeta :: Maybe D.Meta -> IO ()
               saveMeta x = runReaderT (D.set radio x) state
           chan <- liftIO $ newChan
-          buf' <- liftIO $ D.new 100 :: D.Application (D.Buffer ByteString)
+          buf' <- liftIO $ D.new 60 :: D.Application (D.Buffer ByteString)
           D.set radio (Just buf')
           metaInt <- unpackMeta <$> (lookupHeader "icy-metaint" <$> D.get radio) :: D.Application (Maybe Int)
           liftIO $ print "have meta int"
@@ -73,7 +73,7 @@ makeChannel radio = do
           chanStreamInput  <- liftIO $ S.chanToInput  chan
           outputBuffer <- liftIO $ bufferToOutput buf'
           liftIO $ print "have output buffer"
-          void . liftIO $ forkIO $ connectWithRemoveMetaAndBuffering metaInt saveMeta  4096 radioStreamInput'  chanStreamOutput
+          void . liftIO $ forkIO $ connectWithRemoveMetaAndBuffering metaInt saveMeta  8192 radioStreamInput'  chanStreamOutput
           void . liftIO $ forkIO $ S.connect chanStreamInput outputBuffer
           D.set radio $ (Just chan :: Maybe (Chan (Maybe ByteString)))
           -- | @TODO save pid
@@ -133,17 +133,6 @@ connectWithRemoveMetaAndBuffering (Just metaInt) saveMeta buffSize is os = do
                  
 {-# INLINE connectWithRemoveMetaAndBuffering #-}
 
--- | парсим мета информацию
-getMetaInfo :: Int -> Int -> ByteString -> (ByteString, Int, ByteString, ByteString, Int)
-getMetaInfo metaInt'' count bs =
-  let (start, end) = BS.splitAt count bs
-      metaSize = toLen $ BS.take 1 end
-      meta' = BS.tail $ BS.take (metaSize + 1) end
-      end' = BS.drop (metaSize + 1) end
-      count' = metaInt'' - BS.length end'
-  in (start, metaSize, meta', end', count')
-
-
 toLen :: ByteString -> Int
 toLen x = let [w] = BS.unpack x
           in 16 * fromIntegral w
@@ -188,33 +177,25 @@ connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
         writeChunks :: Int -> ByteString -> ByteString -> IO ()
         writeChunks nextMeta oldMeta' bs = do
             meta' <- getMeta
-            putStrLn ""
             case (nextMeta >= BS.length bs, meta') of
                  -- | чанк маленький, уходим выше за новым чанком
                  (True, _) -> do
-                     let aaa = BS.take 1 bs
-                     print $ "aaa in true  " ++ aaa
-                     print $ show (nextMeta - BS.length bs)
                      sendBS bs
                      loop builder metaInt' (nextMeta - BS.length bs) oldMeta'
                  -- | чанк большой, meta info отсутствует, шлем zero каждый metaInt
---                 (False, Nothing) -> do
---                     let (from, to) = BS.splitAt nextMeta bs
---                     sendBS from
---                     sendBS zero
---                     writeChunks (metaInt' - 1) oldMeta' to
+                 (False, Nothing) -> do
+                     let (from, to) = BS.splitAt nextMeta bs
+                     sendBS from
+                     writeChunks (metaInt' + 1) oldMeta' $ mconcat [zero, to]
                  (False, Just (D.Meta (meta'', metaSize))) -> do
                      let (from, to) = BS.splitAt nextMeta bs
-                         aaa = BS.take 1 from
-                     print $ "aaa " ++ aaa
                      sendBS from
                      if meta'' /= oldMeta'
                         then do
                             print $ "insert meta with size " ++  show metaSize
                             print $ "meta " ++ meta''
-                            writeChunks (metaInt' + 1) meta'' $ mconcat [fromLen metaSize, meta'', to]
+                            writeChunks (metaInt' + 1 + BS.length meta'')  meta'' $ mconcat [fromLen metaSize, meta'', to]
                         else do
-                            print "insert zero"
                             writeChunks (metaInt' + 1) oldMeta' $ mconcat [zero, to]
                      
 {-# INLINE connectWithAddMetaAndBuffering #-}
