@@ -30,7 +30,6 @@ import           System.IO.Streams.Concurrent as S
 import           Data.Attoparsec.RFC2616      (Request (..), request)
 
 import           Control.Monad.Reader
-import           Radio.Data
 import           Radio.Internal
 import           Radio.Web                    (web)
 import           Snap.Http.Server             (quickHttpServe)
@@ -54,6 +53,7 @@ main = do
         forkIO $ runReaderT (connectHandler connected  `finally`  (liftIO $ sClose accepted)) state
     sClose sock
     return ()
+    
 
 connectHandler::(InputStream ByteString, OutputStream ByteString) -> Application ()
 connectHandler (iS, oS) = do
@@ -70,14 +70,14 @@ connectHandler (iS, oS) = do
         is <- member $ channel'
         if is
           then do
-             liftIO $ print ("make connection"::String)
-             liftIO $ print request'
-             liftIO $ print headers'
+             say ("make connection"::String)
+             say request'
+             say headers'
              makeClient oS channel'
           else do
            -- | unknown rid
-             liftIO $ print request'
-             liftIO $ print headers'
+             say request'
+             say headers'
              liftIO $ S.write (Just "ICY 404 Not Found\r\n") oS
 
     showType :: SomeException -> String
@@ -97,21 +97,21 @@ makeClient oS radio = do
              start <- liftIO $ S.fromByteString successRespo
              input <- liftIO $ S.chanToInput duplicate
              birst <- liftIO $ getAll buf'
-             liftIO $ print $ "from birst" ++ (Prelude.show $ length birst)
+             say $ "from birst" ++ (Prelude.show $ length birst)
              birst' <- liftIO $ S.fromByteString birst
              withoutMeta <- liftIO $ S.concatInputStreams [ birst', input ]
              state <- ask
              let getMeta :: IO (Maybe Meta)
                  getMeta = runReaderT (get radio) state
-             liftIO $ print "supply start"
+             say "supply start"
              liftIO $ S.supply start oS
-             liftIO $ print "supply end"
+             say "supply end"
              fin <- liftIO $ try $ connectWithAddMetaAndBuffering (Just 8192) getMeta 4096 withoutMeta oS  :: Application (Either SomeException ())
              either whenError whenGood fin
-             liftIO $ print "make finally work"
+             say "make finally work"
          Nothing -> liftIO $ S.write (Just "ICY 423 Locked\r\n") oS
     where
-      whenError s = liftIO $ print $ "catched: " ++ show s
+      whenError s = say $ "catched: " ++ show s
       whenGood _ = return ()
 
 

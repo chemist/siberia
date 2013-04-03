@@ -13,7 +13,6 @@ import           Snap.Core           (Method (..), Snap, dir, emptyResponse,
 import           Snap.Http.Server    (quickHttpServe)
 import           Snap.Util.FileServe (serveDirectory, serveFile)
 
-import           Radio.Data
 import           Radio.Internal     
 
 web :: Web ()
