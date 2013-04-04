@@ -18,6 +18,7 @@ import           Data.Aeson                   (FromJSON (..), ToJSON (..),
 import qualified Data.Map as Map
 import           Data.Attoparsec.RFC2616      (Header (..))
 import           Data.ByteString              (concat)
+import qualified Data.ByteString              as BS
 import           Data.ByteString.Char8        (pack)
 import           Network.Socket               (HostName)
 
@@ -103,6 +104,7 @@ class Detalization m a where
     set :: Radio -> a -> m ()
 
 instance Show Radio where
+    show (ById x) = Prelude.show x
     show x = Prelude.show (rid x) ++ Prelude.show (url x) ++ Prelude.show (hostPort x)
 
 instance ToJSON Radio where
@@ -122,6 +124,12 @@ instance FromJSON Radio where
         rid' <- x .: "id"
         url' <- x .: "url"
         return $ RI (addSlash $ RadioId rid') (Url url') Nothing [] Nothing Nothing Nothing Nothing
+
+instance ToJSON (Maybe Meta) where
+    toJSON (Just (Meta (bs,_))) = object [ "meta" .=  (toJSON $ BS.takeWhile (/= toEnum 0) bs) ]
+    toJSON Nothing = object [ "meta" .=  (toJSON BS.empty) ]
+
+
 
 addSlash::RadioId -> RadioId
 addSlash (RadioId x) = RadioId $ concat ["/", x]

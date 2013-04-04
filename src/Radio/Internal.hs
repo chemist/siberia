@@ -9,6 +9,7 @@ module Radio.Internal (
   , load
   , save
   , say
+  , zero
   , connectWithRemoveMetaAndBuffering
   , connectWithAddMetaAndBuffering
   ) where
@@ -175,8 +176,8 @@ connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
     fromLen :: Int -> ByteString
     fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16)
     
-    zero :: ByteString
-    zero = BS.pack $ [toEnum 0]
+zero :: ByteString
+zero = BS.pack $ [toEnum 0]
 
 {-# INLINE connectWithAddMetaAndBuffering #-}
 

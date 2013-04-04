@@ -41,22 +41,21 @@ postStreamHandler::Web ()
 postStreamHandler = do
         info' <- decode <$> readRequestBody 1024  :: Web (Maybe Radio)
         case info' of
-             Nothing -> finishWith $ setResponseCode 400 emptyResponse
+             Nothing -> errorWWW 400
              Just i -> do
                  (result, infoWithHostPort) <- create i
                  if result
-                    then do
-                        writeLBS $ encode infoWithHostPort
-                    else finishWith $ setResponseCode 409 emptyResponse
+                    then writeLBS $ encode infoWithHostPort
+                    else errorWWW 400
 
 deleteStreamHandler::Web ()
 deleteStreamHandler = do
     param <- getParam "sid"
-    maybe (finishWith $ setResponseCode 400 emptyResponse) rmSt param
+    maybe (errorWWW 400) rmSt param
     where
       rmSt i = do
           result <-  remove $ ById (RadioId i)
-          finishWith $ setResponseCode (if result then 200 else 403) emptyResponse
+          errorWWW (if result then 200 else 403)
 
 
 
@@ -71,6 +70,19 @@ streamHandlerById = do
           writeBS sid
           writeText "with param"
 
-streamMetaHandler = undefined
+streamMetaHandler :: Web ()
+streamMetaHandler = do
+    sid <- getParam "sid"
+    maybe (errorWWW 400) sendMeta  sid
+    where
+    sendMeta :: ByteString -> Web ()
+    sendMeta i = do
+        isInBase <- member (ById (RadioId $ "/" <> i))
+        unless isInBase $ errorWWW 403
+        meta' <- get (ById (RadioId $ "/" <> i)) :: Web (Maybe Meta)
+        (writeLBS . encode) meta'
 
+
+errorWWW :: Int -> Web ()
+errorWWW code = finishWith $ setResponseCode code emptyResponse
 
