@@ -9,7 +9,6 @@ module Radio.Internal (
   , load
   , save
   , say
-  , zero
   , connectWithRemoveMetaAndBuffering
   , connectWithAddMetaAndBuffering
   ) where
@@ -162,9 +161,9 @@ connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
     fun:: IORef (Maybe Meta) -> Chunk -> Meta -> IO Builder
     fun ref (Chunk bs) (Meta (meta', len)) = do
         result <- atomicModifyIORef ref (check meta' len)
-        return $ Builder.fromByteString $ mconcat $ if result
-           then [bs, fromLen len, meta']
-           else [bs, zero]
+        return $ Builder.fromByteString $ if result
+           then bs <> fromLen len <> meta'
+           else bs <> zero
 
     check :: ByteString -> Int -> Maybe Meta -> (Maybe Meta, Bool)
     check _ _ Nothing = (Nothing, False)
@@ -176,8 +175,8 @@ connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
     fromLen :: Int -> ByteString
     fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16)
     
-zero :: ByteString
-zero = BS.pack $ [toEnum 0]
+    zero :: ByteString
+    zero = BS.pack $ [toEnum 0]
 
 {-# INLINE connectWithAddMetaAndBuffering #-}
 
@@ -202,7 +201,7 @@ makeConnect radio = do
    (i, o) <- openConnection radio
    Url u <- get radio
    let Right path = parseOnly parsePath u
-       req = mconcat ["GET ", path, " HTTP/1.0\r\nicy-metadata: 1\r\n\r\n"]
+       req = "GET " <> path <> " HTTP/1.0\r\nicy-metadata: 1\r\n\r\n"
    say "url from radio"
    say u
    say "request to server"
@@ -219,7 +218,7 @@ makeConnect radio = do
 
 
 fakeRadioStream' :: [ByteString]
-fakeRadioStream' = BasicPrelude.map (\x -> mconcat [(E.encodeUtf8 . show) x , " "]) [1.. ]
+fakeRadioStream' = BasicPrelude.map (\x -> (E.encodeUtf8 . show) x <> " ") [1.. ]
 
 fakeInputStream :: IO (S.InputStream ByteString)
 fakeInputStream = S.fromGenerator $ genStream fakeRadioStream'
