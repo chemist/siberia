@@ -21,6 +21,7 @@ web =  ifTop (serveFile "static/index.html")
                               , ("stream", getStreamHandler )
                               , ("stream/:sid", streamHandlerById )
                               , ("stream/:sid/metadata", streamMetaHandler )
+                              , ("stream/:sid/stats", streamStatsHandler )
                               , ("save", saveHandler)
                               ] )                                              
        <|> method POST ( route [ ("stream/:sid", postStreamHandler ) ] )     
@@ -81,6 +82,18 @@ streamMetaHandler = do
         unless isInBase $ errorWWW 403
         meta' <- get (ById (RadioId $ "/" <> i)) :: Web (Maybe Meta)
         (writeLBS . encode) meta'
+
+streamStatsHandler :: Web ()
+streamStatsHandler = do
+    sid <- getParam "sid"
+    maybe (errorWWW 400) sendStatus sid
+    where
+    sendStatus :: ByteString -> Web ()
+    sendStatus i = do
+        isInBase <- member (ById (RadioId $ "/" <> i))
+        unless isInBase $ errorWWW 403
+        st <- get (ById (RadioId $ "/" <> i)):: Web Status
+        (writeLBS . encode) st
 
 
 errorWWW :: Int -> Web ()

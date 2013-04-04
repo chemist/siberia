@@ -45,9 +45,19 @@ type Channel = Maybe (Chan (Maybe ByteString))
 port :: Int
 port = 2000
 
+data Status = Status { connections    :: Int
+                     , connectProcess :: Maybe ThreadId
+                     , bufferProcess  :: Maybe ThreadId
+                     , chanProcess    :: Maybe ThreadId
+                     } deriving (Eq)
+
+defStatus :: Status
+defStatus = Status 0 Nothing Nothing Nothing
+
+
 data RadioInfo x = RI { rid      :: x
                       , url      :: Url
-                      , pid      :: Maybe ThreadId
+                      , pid      :: Status
                       , headers  :: Headers
                       , meta     :: Maybe Meta
                       , channel  :: Channel
@@ -123,13 +133,19 @@ instance FromJSON Radio where
     parseJSON (Object x) = do
         rid' <- x .: "id"
         url' <- x .: "url"
-        return $ RI (addSlash $ RadioId rid') (Url url') Nothing [] Nothing Nothing Nothing Nothing
+        return $ RI (addSlash $ RadioId rid') (Url url') defStatus [] Nothing Nothing Nothing Nothing
 
 instance ToJSON (Maybe Meta) where
     toJSON (Just (Meta (bs,_))) = object [ "meta" .=  (toJSON $ BS.takeWhile (/= toEnum 0) bs) ]
-    toJSON Nothing = object [ "meta" .=  (toJSON BS.empty) ]
+    toJSON Nothing = object [ "meta" .=  toJSON BS.empty ]
 
-
+instance ToJSON Status where
+    toJSON (Status i (Just _) _ _) = object [ "connections" .= toJSON i
+                                            , "status" .= toJSON True
+                                            ]
+    toJSON (Status i Nothing _ _) = object [ "connections" .= toJSON i
+                                           , "status" .= toJSON False
+                                           ]
 
 addSlash::RadioId -> RadioId
 addSlash (RadioId x) = RadioId $ concat ["/", x]
@@ -157,6 +173,6 @@ instance Binary Radio where
     get = do
         r <- B.get :: Get RadioId
         u <- B.get :: Get Url
-        return $ RI r u Nothing [] Nothing Nothing Nothing Nothing 
+        return $ RI r u defStatus [] Nothing Nothing Nothing Nothing 
 
 

@@ -87,10 +87,10 @@ makeChannel radio = do
           chanStreamInput  <- liftIO $ S.chanToInput  chan
           outputBuffer <- liftIO $ bufferToOutput buf'
           say "have output buffer"
---          void . liftIO $ forkIO $ connectWithRemoveMetaAndBuffering metaInt saveMeta  8192 radioStreamInput'  chanStreamOutput
-          liftIO $ connectWithRemoveMetaAndBuffering metaInt saveMeta 8192 radioStreamInput' chanStreamOutput
-          void . liftIO $ forkIO $ S.connect chanStreamInput outputBuffer
-          set radio $ (Just chan :: Maybe (Chan (Maybe ByteString)))
+          (p1,p2) <- liftIO $ connectWithRemoveMetaAndBuffering metaInt saveMeta 8192 radioStreamInput' chanStreamOutput
+          p3 <-  liftIO $ forkIO $ S.connect chanStreamInput outputBuffer
+          set radio $ Status 0 (Just p1) (Just p2) (Just p3)
+          set radio (Just chan :: Maybe (Chan (Maybe ByteString)))
           -- | @TODO save pid
           return ()
       unpackMeta :: [ByteString] -> Maybe Int
@@ -329,6 +329,10 @@ setter x y =  flip modifyMVar_ (return . x)  y
 instance Allowed m => Detalization m Url where
     get radio = info radio >>= liftIO . getter url
     set radio a = info radio >>= liftIO . setter (\y -> y { url = a })
+
+instance Allowed m => Detalization m Status where
+    get radio = info radio >>= liftIO . getter pid
+    set radio a = info radio >>= liftIO . setter (\y -> y { pid = a })
 
 instance Allowed m => Detalization m Headers where
     get radio = info radio >>= liftIO . getter headers
