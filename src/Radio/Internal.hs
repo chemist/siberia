@@ -128,8 +128,7 @@ metaParser metaInt = (A.endOfInput >> pure Nothing) <|> Just <$> do
     body <- A.take metaInt
     len <- toLen <$> A.take 1 
     meta <- A.take len
-    let isZero = len == 0 
-    return (Builder.fromByteString body, Meta (meta, len, isZero))
+    return (Builder.fromByteString body, Meta (meta, len))
 
 toLen :: ByteString -> Int
 toLen x = let [w] = BS.unpack x
@@ -140,9 +139,9 @@ newtype Chunk = Chunk ByteString
 toChunks :: Int -> A.Parser (Maybe Chunk)
 toChunks metaInt = (A.endOfInput >> pure Nothing) <|> Just . Chunk <$> A.take metaInt
 
-connectWithAddMetaAndBuffering :: Maybe Int   -- ^ meta int
+connectWithAddMetaAndBuffering :: Maybe Int       -- ^ meta int
                                ->  IO (Maybe Meta) -- ^ получить мета информацию
-                               ->  Int   -- ^ размер буфера
+                               ->  Int             -- ^ размер буфера
                                ->  InputStream ByteString
                                ->  OutputStream ByteString
                                ->  IO ()
@@ -155,12 +154,23 @@ connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
     builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
     chunked <- S.parserToInputStream (toChunks metaInt) is
     metas   <- S.makeInputStream getMeta
--- | нужна проверка на последнюю вставленную meta info
-    withMeta <- S.zipWith fun chunked metas
+    refMeta <- newIORef $ Just (Meta ("",0))
+    withMeta <- S.zipWithM (fun refMeta) chunked metas
     S.connect withMeta builder
     where 
-    fun (Chunk bs) (Meta (meta', len, False)) = trace "false" Builder.fromByteString $ mconcat [bs, fromLen len, meta']
-    fun (Chunk bs) (Meta (meta', len, True)) = trace "true" Builder.fromByteString $ mconcat [bs, zero]
+    fun:: IORef (Maybe Meta) -> Chunk -> Meta -> IO Builder
+    fun ref (Chunk bs) (Meta (meta', len)) = do
+        result <- atomicModifyIORef ref (check meta' len)
+        return $ Builder.fromByteString $ mconcat $ if result
+           then [bs, fromLen len, meta']
+           else [bs, zero]
+
+    check :: ByteString -> Int -> Maybe Meta -> (Maybe Meta, Bool)
+    check _ _ Nothing = (Nothing, False)
+    check bs nl (Just (Meta (m, l))) = 
+      if bs == m 
+         then (Just (Meta (m,l)), False)
+         else (Just (Meta (bs,nl)), True)
 
     fromLen :: Int -> ByteString
     fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16)
@@ -329,13 +339,8 @@ instance Allowed m => Detalization m Channel where
 
 instance Allowed m => Detalization m (Maybe Meta) where
     get radio = info radio >>= liftIO . getter meta
-    set radio (Just (Meta ("",0,_))) = do
-        Just (Meta (meta', len, isZero)) <- get radio
-        say meta'
-        say len
-        say isZero
-        unless isZero $ info radio >>= liftIO . setter (\y -> y { meta = Just (Meta (meta', len, True)) })
-    set radio a = say a >> info radio >>= liftIO . setter (\y -> y { meta = a })
+    set radio (Just (Meta ("",0))) = return ()
+    set radio a = info radio >>= liftIO . setter (\y -> y { meta = a })
 
 instance Allowed m => Detalization m (Maybe (Buffer ByteString)) where
     get radio = info radio >>= liftIO . getter buff

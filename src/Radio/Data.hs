@@ -32,13 +32,10 @@ import Data.IORef
 import Data.Cycle
 import qualified Data.Collections as Collections
 import Blaze.ByteString.Builder (Builder)
-import Control.Monad.Trans.Writer
-import Control.Monad.Trans.Error
-import qualified System.IO as SIO (readFile, IOMode(..))
 
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
-newtype Meta = Meta (ByteString, Int, Bool) deriving (Show, Ord, Eq)
+newtype Meta = Meta (ByteString, Int) deriving (Show, Ord, Eq)
 
 type Headers = [Header]
 type HostPort = Maybe (HostName, Int)
