@@ -38,7 +38,7 @@ import qualified System.IO as SIO (readFile, IOMode(..))
 
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
-newtype Meta = Meta (ByteString, Int) deriving (Show, Ord, Eq)
+newtype Meta = Meta (ByteString, Int, Bool) deriving (Show, Ord, Eq)
 
 type Headers = [Header]
 type HostPort = Maybe (HostName, Int)

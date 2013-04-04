@@ -45,6 +45,7 @@ import           Data.IORef
 import           Data.Text.Encoding                       as E
 import           Radio.Data
 import Control.Applicative hiding (empty)
+import Debug.Trace
 
 say :: (Show a, MonadIO m) => a -> m ()
 say = liftIO . print
@@ -104,15 +105,14 @@ connectWithRemoveMetaAndBuffering ::Maybe Int                -- ^ meta int
                                   -> OutputStream ByteString  -- ^ выходной поток
                                   -> IO (ThreadId, ThreadId)
 connectWithRemoveMetaAndBuffering Nothing _ buffSize is os = do
-    let strategy = allNewBuffersStrategy buffSize
-    builder <- S.builderStreamWith strategy os
+    builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
     ps <- S.parserToInputStream toBuilder is
     x <- forkIO $ S.connect ps builder
     return (x,x)
+
 connectWithRemoveMetaAndBuffering (Just metaInt) saveMeta buffSize is os = do
-    let strategy = allNewBuffersStrategy buffSize
-    builder <- S.builderStreamWith strategy os
-    parsed <- S.parserToInputStream (metaParser metaInt) is
+    builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
+    parsed <-  S.parserToInputStream (metaParser metaInt) is
     (isb, ism) <- S.unzip parsed
     osm <- S.makeOutputStream saveMeta
     x <- forkIO $ S.connect isb builder
@@ -121,19 +121,24 @@ connectWithRemoveMetaAndBuffering (Just metaInt) saveMeta buffSize is os = do
 {-# INLINE connectWithRemoveMetaAndBuffering #-}
 
 toBuilder :: A.Parser (Maybe Builder)
-toBuilder = (A.endOfInput >> pure Nothing) <|> Just <$> (A.take 4096 >>= return . Builder.fromByteString)
+toBuilder = (A.endOfInput >> pure Nothing) <|> Just . Builder.fromByteString <$> A.take 4096 
 
 metaParser :: Int -> A.Parser (Maybe (Builder, Meta))
 metaParser metaInt = (A.endOfInput >> pure Nothing) <|> Just <$> do
     body <- A.take metaInt
     len <- toLen <$> A.take 1 
     meta <- A.take len
-    return (Builder.fromByteString body, Meta (meta, len))
+    let isZero = len == 0 
+    return (Builder.fromByteString body, Meta (meta, len, isZero))
 
 toLen :: ByteString -> Int
 toLen x = let [w] = BS.unpack x
           in 16 * fromIntegral w
 
+newtype Chunk = Chunk ByteString
+
+toChunks :: Int -> A.Parser (Maybe Chunk)
+toChunks metaInt = (A.endOfInput >> pure Nothing) <|> Just . Chunk <$> A.take metaInt
 
 connectWithAddMetaAndBuffering :: Maybe Int   -- ^ meta int
                                ->  IO (Maybe Meta) -- ^ получить мета информацию
@@ -142,58 +147,27 @@ connectWithAddMetaAndBuffering :: Maybe Int   -- ^ meta int
                                ->  OutputStream ByteString
                                ->  IO ()
 connectWithAddMetaAndBuffering Nothing _ buffSize is os = do
-    let strategy = allNewBuffersStrategy buffSize
-    builder <- S.builderStreamWith strategy os
-    loop builder
-    where
-    loop builder = do
-        !m <- S.read is
-        maybe (S.write Nothing builder) writeChunks m
-        where 
-        writeChunks :: ByteString -> IO ()
-        writeChunks bs = S.write (Just $ Builder.fromByteString bs) builder >> loop builder
-        
+    builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
+    ps <- S.parserToInputStream toBuilder is
+    S.connect ps builder
+
 connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
-    let strategy = allNewBuffersStrategy buffSize
-    builder <- S.builderStreamWith strategy os
-    loop builder metaInt metaInt ""
-    where
+    builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
+    chunked <- S.parserToInputStream (toChunks metaInt) is
+    metas   <- S.makeInputStream getMeta
+-- | нужна проверка на последнюю вставленную meta info
+    withMeta <- S.zipWith fun chunked metas
+    S.connect withMeta builder
+    where 
+    fun (Chunk bs) (Meta (meta', len, False)) = trace "false" Builder.fromByteString $ mconcat [bs, fromLen len, meta']
+    fun (Chunk bs) (Meta (meta', len, True)) = trace "true" Builder.fromByteString $ mconcat [bs, zero]
+
     fromLen :: Int -> ByteString
     fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16)
     
     zero :: ByteString
     zero = BS.pack $ [toEnum 0]
 
-    loop builder metaInt' whereNextMetaInt oldMeta = do
-        !m <- S.read is
-        maybe (S.write Nothing builder) (writeChunks whereNextMetaInt oldMeta) m
-        where  
-        sendBS :: ByteString -> IO ()
-        sendBS bs = S.write (Just $ Builder.fromByteString bs) builder
-
-        writeChunks :: Int -> ByteString -> ByteString -> IO ()
-        writeChunks nextMeta oldMeta' bs = do
-            meta' <- getMeta
-            case (nextMeta >= BS.length bs, meta') of
-                 -- | чанк маленький, уходим выше за новым чанком
-                 (True, _) -> do
-                     sendBS bs
-                     loop builder metaInt' (nextMeta - BS.length bs) oldMeta'
-                 -- | чанк большой, meta info отсутствует, шлем zero каждый metaInt
-                 (False, Nothing) -> do
-                     let (from, to) = BS.splitAt nextMeta bs
-                     sendBS from
-                     writeChunks (metaInt' + 1) oldMeta' $ mconcat [zero, to]
-                 (False, Just (Meta (meta'', metaSize))) -> do
-                     let (from, to) = BS.splitAt nextMeta bs
-                     sendBS from
-                     if meta'' /= oldMeta'
-                        then do
-                            print $ "insert meta with size " ++  show metaSize
-                            print $ "meta " ++ meta''
-                            writeChunks (metaInt' + 1 + BS.length meta'')  meta'' $ mconcat [fromLen metaSize, meta'', to]
-                        else do
-                            writeChunks (metaInt' + 1) oldMeta' $ mconcat [zero, to]
 {-# INLINE connectWithAddMetaAndBuffering #-}
 
 
@@ -355,8 +329,13 @@ instance Allowed m => Detalization m Channel where
 
 instance Allowed m => Detalization m (Maybe Meta) where
     get radio = info radio >>= liftIO . getter meta
-    set radio (Just (Meta ("",0))) = return ()
-    set radio a = info radio >>= liftIO . setter (\y -> y { meta = a })
+    set radio (Just (Meta ("",0,_))) = do
+        Just (Meta (meta', len, isZero)) <- get radio
+        say meta'
+        say len
+        say isZero
+        unless isZero $ info radio >>= liftIO . setter (\y -> y { meta = Just (Meta (meta', len, True)) })
+    set radio a = say a >> info radio >>= liftIO . setter (\y -> y { meta = a })
 
 instance Allowed m => Detalization m (Maybe (Buffer ByteString)) where
     get radio = info radio >>= liftIO . getter buff
