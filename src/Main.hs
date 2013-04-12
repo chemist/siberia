@@ -30,9 +30,12 @@ import           System.IO.Streams.Concurrent as S
 import           Data.Attoparsec.RFC2616      (Request (..), request)
 
 import           Control.Monad.Reader
-import           Radio.Internal
+import           Radio.Internal 
 import           Radio.Web                    (web)
 import           Snap.Http.Server             (quickHttpServe)
+-- import qualified  Control.Distributed.Process as P 
+-- import qualified  Control.Distributed.Process.Node as P
+-- import qualified  Control.Distributed.Process.Backend.SimpleLocalnet as P
 
 main::IO ()
 main = do
@@ -123,7 +126,7 @@ emptyState = do
 
 successRespo :: ByteString
 successRespo = concat [ "ICY 200 OK\r\n"
-                      , "icy-notice1: Haskell shoucast splitter\r\n"
+                      , "icy-notice1: Siberia shoutcast server\r\n"
                       , "icy-notice2: Good music here\r\n"
                       , "content-type: audio/mpeg\r\n"
                       , "icy-name: Good music for avery one \r\n"
