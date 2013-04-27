@@ -64,7 +64,23 @@ data RadioInfo x = RI { rid      :: x
                       , hostPort :: HostPort
                       , buff     :: Maybe (Buffer ByteString)
                       }
-                  | ById { rid :: x } deriving (Eq)
+                  | ById { rid :: x } 
+                  | Local { rid :: x
+                          , url :: Url
+                          , pid :: Status
+                          , meta :: Maybe Meta
+                          , channel :: Channel
+                          , buff :: Maybe (Buffer ByteString)
+                          , playList :: Cycle Song
+                          } deriving (Eq)
+
+data Song = Song { sidi :: Int
+                 , spath :: String
+                 } deriving (Eq)
+
+instance Ord Song where
+    compare x y = compare (sidi x) (sidi y)
+
                       
 type Radio = RadioInfo RadioId
 data Store a = Store (MVar (Map RadioId (MVar a))) HostPort
@@ -95,7 +111,7 @@ class Monoid a => RadioBuffer m a where
     getAll    :: m a -> IO a
 
 runWeb :: Web a -> RadioStore -> Snap a
-runWeb m r = runReaderT m r
+runWeb = runReaderT 
 
 class (Monad m, MonadIO m, MonadReader RadioStore m) => Allowed m 
 

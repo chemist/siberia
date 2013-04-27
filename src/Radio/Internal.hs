@@ -197,6 +197,7 @@ makeConnect (ById (RadioId "/test")) = do
     say "test radio stream"
     say "test radio stream"
     return i
+makeConnect radio@(Local _ _ _ _ _ _ _) = openLocalStream radio
 makeConnect radio = do
    (i, o) <- openConnection radio
    Url u <- get radio
@@ -249,6 +250,20 @@ openConnection radio = do
     return (i, o)
     where
        hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
+
+openLocalStream :: Radio -> Application (InputStream ByteString)
+openLocalStream radio = do
+    l <-  sequence $ repeat $ oneSongStream radio
+    liftIO $ concatInputStreams l
+
+oneSongStream radio = do
+    playList' <- get radio :: Application (Cycle Song)
+    let Song _ toPlay = getValue playList'
+        newPlayList = goRight playList'
+    set radio newPlayList
+    bs <-  liftIO $ BS.readFile toPlay
+    liftIO $ fromByteString bs
+
 
 instance Monoid a => RadioBuffer Buffer a where
     new n = do
@@ -320,10 +335,10 @@ addHostPort hp x = x { hostPort = hp }
 
 -- | helpers
 getter ::(Radio -> a) -> MVar Radio -> IO a
-getter x y =  flip  withMVar (return . x)  y
+getter x =  flip  withMVar (return . x)  
 
 setter :: (Radio -> Radio) -> MVar Radio -> IO ()
-setter x y =  flip modifyMVar_ (return . x)  y
+setter x  =  flip modifyMVar_ (return . x)  
 
 instance Allowed m => Detalization m Url where
     get radio = info radio >>= liftIO . getter url
@@ -349,5 +364,9 @@ instance Allowed m => Detalization m (Maybe Meta) where
 instance Allowed m => Detalization m (Maybe (Buffer ByteString)) where
     get radio = info radio >>= liftIO . getter buff
     set radio a = info radio >>= liftIO . setter (\y -> y { buff = a})
+
+instance Allowed m => Detalization m (Cycle Song) where
+    get radio = info radio >>= liftIO . getter playList
+    set radio a = info radio >>= liftIO . setter (\y -> y { playList = a })
 
 
