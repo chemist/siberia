@@ -197,25 +197,30 @@ makeConnect (ById (RadioId "/test")) = do
     say "test radio stream"
     say "test radio stream"
     return i
-makeConnect radio@(Local _ _ _ _ _ _ _) = openLocalStream radio
 makeConnect radio = do
-   (i, o) <- openConnection radio
-   Url u <- get radio
-   let Right path = parseOnly parsePath u
-       req = "GET " <> path <> " HTTP/1.0\r\nicy-metadata: 1\r\n\r\n"
-   say "url from radio"
-   say u
-   say "request to server"
-   say req
-   getStream <- liftIO $ S.fromByteString req
-   liftIO $ S.connect getStream o
-   (response', headers') <- liftIO $ S.parseFromStream response i
-   -- | @TODO обработать исключения
-   set radio headers'
-   say response'
-   say headers'
-   say "makeConnect end"
-   return i
+    t <- radioType radio
+    case t of
+         LocalFiles -> openLocalStream radio
+         Id -> say "bad radio" >> undefined
+         Proxy -> do
+             (i, o) <- openConnection radio
+             Url u <- get radio
+             let Right path = parseOnly parsePath u
+                 req = "GET " <> path <> " HTTP/1.0\r\nicy-metadata: 1\r\n\r\n"
+             say "url from radio"
+             say u
+             say "request to server"
+             say req
+             getStream <- liftIO $ S.fromByteString req
+             liftIO $ S.connect getStream o
+             (response', headers') <- liftIO $ S.parseFromStream response i
+             -- | @TODO обработать исключения
+             set radio headers'
+             say response'
+             say headers'
+             say "makeConnect end"
+             return i
+
 
 
 fakeRadioStream' :: [ByteString]
@@ -292,6 +297,8 @@ instance Monoid a => RadioBuffer Buffer a where
         let res = takeLR s $ goLR (1 + getValue position) buf'
         mconcat <$> Prelude.mapM (\y -> readIORef y) res
 
+makePlayList :: Radio -> IO Radio
+makePlayList r = undefined
 
 instance Allowed m => Storable m Radio where
     member (ById (RadioId "/test")) = return True
@@ -300,6 +307,11 @@ instance Allowed m => Storable m Radio where
         liftIO $ withMVar x $ \y -> return $ (rid r) `Map.member` y
     create r = do
         (Store x hp) <- ask
+        t <-  radioType r
+        rr <- case t of
+                 Proxy -> return r
+                 LocalFiles -> makePlayList r
+                 _ -> undefined
         let withPort = addHostPort hp r
         is <- member r
         if is
@@ -327,6 +339,13 @@ instance Allowed m => Storable m Radio where
         liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (rid a) y
     -- | @TODO catch exception
     --
+    radioType a = do
+        radio <- info a >>= liftIO . getter id 
+        case radio of
+             Local {} -> return LocalFiles
+             RI {} -> return Proxy
+             _ -> return Id
+
 
 
 

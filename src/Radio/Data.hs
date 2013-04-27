@@ -45,6 +45,8 @@ type Channel = Maybe (Chan (Maybe ByteString))
 port :: Int
 port = 2000
 
+data RadioType = LocalFiles | Proxy | Id
+
 data Status = Status { connections    :: Int
                      , connectProcess :: Maybe ThreadId
                      , bufferProcess  :: Maybe ThreadId
@@ -69,7 +71,9 @@ data RadioInfo x = RI { rid      :: x
                           , url :: Url
                           , pid :: Status
                           , meta :: Maybe Meta
+                          , headers :: Headers
                           , channel :: Channel
+                          , hostPort :: HostPort
                           , buff :: Maybe (Buffer ByteString)
                           , playList :: Cycle Song
                           } deriving (Eq)
@@ -124,6 +128,7 @@ class Storable m a where
     remove :: a -> m Bool
     list   :: m [a]
     info   :: a -> m (MVar a)
+    radioType :: a -> m RadioType
     
 class Detalization m a where
     get :: Radio -> m a
@@ -149,7 +154,9 @@ instance FromJSON Radio where
     parseJSON (Object x) = do
         rid' <- x .: "id"
         url' <- x .: "url"
-        return $ RI (addSlash $ RadioId rid') (Url url') defStatus [] Nothing Nothing Nothing Nothing
+        if "http" == (BS.take 4 url') 
+             then return $ RI (addSlash $ RadioId rid') (Url url') defStatus [] Nothing Nothing Nothing Nothing
+             else return $ Local (addSlash $ RadioId rid') (Url url') defStatus Nothing [] Nothing  Nothing Nothing empty
 
 instance ToJSON (Maybe Meta) where
     toJSON (Just (Meta (bs,_))) = object [ "meta" .=  (toJSON $ BS.takeWhile (/= toEnum 0) bs) ]
