@@ -58,7 +58,8 @@ save path = do
 load :: Allowed m => Prelude.FilePath -> m ()
 load path = do
     l <- liftIO $ LS.readFile path
-    R.mapM_ create $ (decode l :: [Radio])
+    let radio  = decode l :: [Radio]
+    _ <- R.mapM_ create radio
     return ()
 
 -- | создаем канал
@@ -307,11 +308,11 @@ instance Allowed m => Storable m Radio where
         liftIO $ withMVar x $ \y -> return $ (rid r) `Map.member` y
     create r = do
         (Store x hp) <- ask
-        t <-  radioType r
-        rr <- case t of
-                 Proxy -> return r
-                 LocalFiles -> makePlayList r
-                 _ -> undefined
+        --t <-  radioType r
+        --rr <- case t of
+        --         Proxy -> return r
+        --         LocalFiles -> liftIO $ makePlayList r
+        --         _ -> undefined
         let withPort = addHostPort hp r
         is <- member r
         if is
@@ -341,6 +342,8 @@ instance Allowed m => Storable m Radio where
     --
     radioType a = do
         radio <- info a >>= liftIO . getter id 
+        liftIO $ print "radioType"
+        liftIO $ print radio
         case radio of
              Local {} -> return LocalFiles
              RI {} -> return Proxy

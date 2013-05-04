@@ -36,6 +36,7 @@ saveHandler = save "radiobase"
 getStreamHandler :: Web ()
 getStreamHandler = do
         s <- list :: Web [Radio]
+        liftIO $ print s
         writeLBS $ encode s
 
 postStreamHandler::Web ()
