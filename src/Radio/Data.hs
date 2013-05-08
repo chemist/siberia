@@ -25,7 +25,6 @@ import           Network.Socket               (HostName)
 import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
--- import Control.Monad.Reader hiding (mapM)
 import Control.Monad.RWS.Lazy
 import           Snap.Core           (Snap)
 import qualified Data.Binary as B
@@ -34,6 +33,7 @@ import Data.IORef
 import Data.Cycle
 import qualified Data.Collections as Collections
 import Blaze.ByteString.Builder (Builder)
+import qualified Data.Map as M
 
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
@@ -77,23 +77,28 @@ data RadioInfo x = RI { rid      :: x
                           , channel :: Channel
                           , hostPort :: HostPort
                           , buff :: Maybe (Buffer ByteString)
-                          , playList :: Cycle Song
+                          , playList :: Playlist
                           } deriving (Eq)
 
 data Song = Song { sidi :: Int
                  , spath :: String
                  } deriving (Eq)
+                 
+type Playlist = Cycle Song
 
 instance Ord Song where
     compare x y = compare (sidi x) (sidi y)
+   
 
                       
 type Radio = RadioInfo RadioId
-data Store a = Store (MVar (Map RadioId (MVar a))) HostPort
+data Store a = Store (MVar (Map RadioId (MVar a))) HostPort (MVar AllPlaylist)
 
-type RadioStore = Store Radio
+type State = M.Map (RadioInfo RadioId) Playlist
 
-newtype State = State String
+type RadioStore = Store Radio 
+
+type AllPlaylist = M.Map (RadioInfo RadioId) Playlist
 newtype Logger = Logger Text
 
 instance Monoid Logger where

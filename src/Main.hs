@@ -40,7 +40,7 @@ import           Snap.Http.Server             (quickHttpServe)
 -- import qualified  Control.Distributed.Process.Backend.SimpleLocalnet as P
 -- 
 
-emptyStateS = return $ State "hello"
+emptyStateS = return $ Map.empty
 
 main::IO ()
 main = do
@@ -133,7 +133,8 @@ emptyStateR::IO RadioStore
 emptyStateR = do
     host <- getHostName
     a <- newMVar Map.empty
-    return $ Store a (Just (host, 2000))
+    allPlaylist <- newMVar Map.empty
+    return $ Store a (Just (host, 2000)) allPlaylist
 
 successRespo :: ByteString
 successRespo = concat [ "ICY 200 OK\r\n"

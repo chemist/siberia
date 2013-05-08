@@ -310,10 +310,10 @@ makePlayList r = undefined
 instance Allowed m => Storable m Radio where
     member (ById (RadioId "/test")) = return True
     member r = do
-        (Store x _) <- ask
+        (Store x _ _) <- ask
         liftIO $ withMVar x $ \y -> return $ (rid r) `Map.member` y
     create r = do
-        (Store x hp) <- ask
+        (Store x hp _) <- ask
         --t <-  radioType r
         --rr <- case t of
         --         Proxy -> return r
@@ -328,7 +328,7 @@ instance Allowed m => Storable m Radio where
                liftIO $ modifyMVar_ x $ \mi -> return $ Map.insert (rid r) mv mi
                return (True, withPort)
     remove r = do
-        (Store x _) <- ask
+        (Store x _ _) <- ask
         is <- member r
         if is
            then do
@@ -336,13 +336,13 @@ instance Allowed m => Storable m Radio where
                return True
            else return False
     list = do
-        (Store x _) <- ask
+        (Store x _ _) <- ask
         liftIO $ withMVar x fromMVar
         where
           fromMVar :: Map RadioId (MVar Radio) -> IO [Radio]
           fromMVar y = Prelude.mapM (\(_, mv) -> withMVar mv return) $ Map.toList y
     info a = do
-        (Store x _) <- ask
+        (Store x _ _) <- ask
         liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (rid a) y
     -- | @TODO catch exception
     --
