@@ -33,6 +33,7 @@ import           Control.Monad.RWS.Lazy hiding (listen, getAll)
 import           Radio.Internal 
 import           Radio.Web                    (web)
 import           Snap.Http.Server             (quickHttpServe)
+import qualified Data.Collections as Collections
 
 
 -- import qualified  Control.Distributed.Process as P 
@@ -133,7 +134,8 @@ emptyStateR::IO RadioStore
 emptyStateR = do
     host <- getHostName
     a <- newMVar Map.empty
-    allPlaylist <- newMVar Map.empty
+    playlist' <- newMVar $ Collections.fromList[Song 1 "music.mp3"]
+    allPlaylist <- newMVar $ Map.fromList [(RadioId "/local", playlist')]
     return $ Store a (Just (host, 2000)) allPlaylist
 
 successRespo :: ByteString

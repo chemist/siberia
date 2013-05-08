@@ -52,10 +52,11 @@ data Status = Status { connections    :: Int
                      , connectProcess :: Maybe ThreadId
                      , bufferProcess  :: Maybe ThreadId
                      , chanProcess    :: Maybe ThreadId
+                     , connectionsProcesses :: [ThreadId]
                      } deriving (Eq)
 
 defStatus :: Status
-defStatus = Status 0 Nothing Nothing Nothing
+defStatus = Status 0 Nothing Nothing Nothing []
 
 logFile = "log/siberia.log"
 
@@ -68,17 +69,7 @@ data RadioInfo x = RI { rid      :: x
                       , hostPort :: HostPort
                       , buff     :: Maybe (Buffer ByteString)
                       }
-                  | ById { rid :: x } 
-                  | Local { rid :: x
-                          , url :: Url
-                          , pid :: Status
-                          , meta :: Maybe Meta
-                          , headers :: Headers
-                          , channel :: Channel
-                          , hostPort :: HostPort
-                          , buff :: Maybe (Buffer ByteString)
-                          , playList :: Playlist
-                          } deriving (Eq)
+                  | ById { rid :: x } deriving (Eq)
 
 data Song = Song { sidi :: Int
                  , spath :: String
@@ -92,13 +83,14 @@ instance Ord Song where
 
                       
 type Radio = RadioInfo RadioId
+type AllPlaylist = M.Map RadioId (MVar Playlist)
+
 data Store a = Store (MVar (Map RadioId (MVar a))) HostPort (MVar AllPlaylist)
 
-type State = M.Map (RadioInfo RadioId) Playlist
+type State = AllPlaylist
 
 type RadioStore = Store Radio 
 
-type AllPlaylist = M.Map (RadioInfo RadioId) Playlist
 newtype Logger = Logger Text
 
 instance Monoid Logger where
@@ -140,17 +132,23 @@ instance Allowed Application
 instance Allowed Web 
 
 class Storable m a where
+    -- ** проверка наличия радиостанции
     member :: a -> m Bool
+    -- ** создание радиостанции
     create :: a -> m (Bool, a)
+    -- ** удаление радиостанции
     remove :: a -> m Bool
+    -- ** список радиостанций
     list   :: m [a]
+    -- ** возвращает MVar с RadioInfo по ById RadioId
     info   :: a -> m (MVar a)
-    radioType :: a -> m RadioType
+    -- ** возвращает MVar Playlist если определенн
+    playlist :: a -> m (Maybe (MVar Playlist))
     
 class Detalization m a where
     getD :: Radio -> m a
     setD :: Radio -> a -> m ()
-
+    
 instance Show Radio where
     show (ById x) = Prelude.show x
     show x = Prelude.show (rid x) ++ Prelude.show (url x) ++ Prelude.show (hostPort x)
@@ -171,19 +169,17 @@ instance FromJSON Radio where
     parseJSON (Object x) = do
         rid' <- x .: "id"
         url' <- x .: "url"
-        if "http" == (BS.take 4 url') 
-             then return $ RI (addSlash $ RadioId rid') (Url url') defStatus [] Nothing Nothing Nothing Nothing
-             else return $ Local (addSlash $ RadioId rid') (Url url') defStatus Nothing [] Nothing  Nothing Nothing empty
+        return $ RI (addSlash $ RadioId rid') (Url url') defStatus [] Nothing Nothing Nothing Nothing
 
 instance ToJSON (Maybe Meta) where
     toJSON (Just (Meta (bs,_))) = object [ "meta" .=  (toJSON $ BS.takeWhile (/= toEnum 0) bs) ]
     toJSON Nothing = object [ "meta" .=  toJSON BS.empty ]
 
 instance ToJSON Status where
-    toJSON (Status i (Just _) _ _) = object [ "connections" .= toJSON i
+    toJSON (Status i (Just _) _ _ _) = object [ "connections" .= toJSON i
                                             , "status" .= toJSON True
                                             ]
-    toJSON (Status i Nothing _ _) = object [ "connections" .= toJSON i
+    toJSON (Status i Nothing _ _ _) = object [ "connections" .= toJSON i
                                            , "status" .= toJSON False
                                            ]
 
