@@ -25,7 +25,8 @@ import           Network.Socket               (HostName)
 import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
-import Control.Monad.Reader hiding (mapM)
+-- import Control.Monad.Reader hiding (mapM)
+import Control.Monad.RWS.Lazy
 import           Snap.Core           (Snap)
 import qualified Data.Binary as B
 import Data.Binary (Binary, Get)
@@ -56,6 +57,7 @@ data Status = Status { connections    :: Int
 defStatus :: Status
 defStatus = Status 0 Nothing Nothing Nothing
 
+logFile = "log/siberia.log"
 
 data RadioInfo x = RI { rid      :: x
                       , url      :: Url
@@ -91,9 +93,16 @@ data Store a = Store (MVar (Map RadioId (MVar a))) HostPort
 
 type RadioStore = Store Radio
 
-type Application = ReaderT RadioStore IO
+newtype State = State String
+newtype Logger = Logger Text
 
-type Web = ReaderT RadioStore Snap 
+instance Monoid Logger where
+    mempty = Logger $ mempty
+    mappend (Logger x) (Logger y) = Logger $ mappend x y
+
+type Application = RWST RadioStore Logger State IO
+
+type Web = RWST RadioStore Logger State Snap 
 
 data Buffer a = Buffer { active :: IORef (Cycle Int)
                        , buf    :: IORef (Cycle (IORef a))
@@ -114,10 +123,13 @@ class Monoid a => RadioBuffer m a where
     -- ** вернуть весь буфер в упорядоченном состоянии
     getAll    :: m a -> IO a
 
-runWeb :: Web a -> RadioStore -> Snap a
-runWeb = runReaderT 
+runWeb :: Web a -> RadioStore -> State -> Snap a
+runWeb mw r s = do (a, _, Logger w) <- runRWST mw r s
+                   liftIO $ appendFile logFile w
+                   return a
 
-class (Monad m, MonadIO m, MonadReader RadioStore m) => Allowed m 
+
+class (Monad m, MonadIO m, MonadReader RadioStore m, MonadWriter Logger m, MonadState State m) => Allowed m 
 
 instance Allowed Application 
 instance Allowed Web 
@@ -131,8 +143,8 @@ class Storable m a where
     radioType :: a -> m RadioType
     
 class Detalization m a where
-    get :: Radio -> m a
-    set :: Radio -> a -> m ()
+    getD :: Radio -> m a
+    setD :: Radio -> a -> m ()
 
 instance Show Radio where
     show (ById x) = Prelude.show x

@@ -36,7 +36,6 @@ saveHandler = save "radiobase"
 getStreamHandler :: Web ()
 getStreamHandler = do
         s <- list :: Web [Radio]
-        liftIO $ print s
         writeLBS $ encode s
 
 postStreamHandler::Web ()
@@ -81,7 +80,7 @@ streamMetaHandler = do
     sendMeta i = do
         isInBase <- member (ById (RadioId $ "/" <> i))
         unless isInBase $ errorWWW 403
-        meta' <- get (ById (RadioId $ "/" <> i)) :: Web (Maybe Meta)
+        meta' <- getD (ById (RadioId $ "/" <> i)) :: Web (Maybe Meta)
         (writeLBS . encode) meta'
 
 streamStatsHandler :: Web ()
@@ -93,7 +92,7 @@ streamStatsHandler = do
     sendStatus i = do
         isInBase <- member (ById (RadioId $ "/" <> i))
         unless isInBase $ errorWWW 403
-        st <- get (ById (RadioId $ "/" <> i)):: Web Status
+        st <- getD (ById (RadioId $ "/" <> i)):: Web Status
         (writeLBS . encode) st
 
 

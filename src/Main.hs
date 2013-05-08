@@ -29,21 +29,28 @@ import           System.IO.Streams.Concurrent as S
 
 import           Data.Attoparsec.RFC2616      (Request (..), request)
 
-import           Control.Monad.Reader
+import           Control.Monad.RWS.Lazy hiding (listen, getAll)
 import           Radio.Internal 
 import           Radio.Web                    (web)
 import           Snap.Http.Server             (quickHttpServe)
+
+
 -- import qualified  Control.Distributed.Process as P 
 -- import qualified  Control.Distributed.Process.Node as P
 -- import qualified  Control.Distributed.Process.Backend.SimpleLocalnet as P
+-- 
+
+emptyStateS = return $ State "hello"
 
 main::IO ()
 main = do
 --     mainId <- myThreadId
-    state <- emptyState
+    stateR <- emptyStateR
+    stateS <- emptyStateS
     -- | start web application
-    void . forkIO $ quickHttpServe $ runWeb web state
-    _ <- try $ runReaderT (load "radiobase") state :: IO (Either SomeException ())
+    void . forkIO $ quickHttpServe $ void $ runWeb web stateR stateS
+    Right (_, _, Logger w) <- try $ runRWST (load "radiobase") stateR stateS :: IO (Either SomeException ((),State, Logger))
+    appendFile logFile w
     -- | open socket
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1
@@ -53,7 +60,8 @@ main = do
     void . forever $ do
         (accepted, _) <- accept sock
         connected <- socketToStreams accepted
-        forkIO $ runReaderT (connectHandler connected  `finally`  (liftIO $ sClose accepted)) state
+        forkIO $ do (_, _, Logger w) <- runRWST (connectHandler connected  `finally`  (liftIO $ sClose accepted)) stateR stateS
+                    appendFile logFile w
     sClose sock
     return ()
     
@@ -73,14 +81,14 @@ connectHandler (iS, oS) = do
         is <- member $ channel'
         if is
           then do
-             say ("make connection"::String)
-             say request'
-             say headers'
+             say "make connection"
+             say $ show request'
+             say $ show headers'
              makeClient oS channel'
           else do
            -- | unknown rid
-             say request'
-             say headers'
+             say $ show request'
+             say $ show headers'
              liftIO $ S.write (Just "ICY 404 Not Found\r\n") oS
 
     showType :: SomeException -> String
@@ -88,24 +96,27 @@ connectHandler (iS, oS) = do
 
 makeClient :: OutputStream ByteString -> Radio -> Application ()
 makeClient oS radio = do
-    chan <- get radio :: Application Channel
+    chan <- getD radio :: Application Channel
     when (isNothing chan) $ do
         makeChannel radio
         liftIO $ threadDelay 1000000
-    chan' <- get radio :: Application Channel
+    chan' <- getD radio :: Application Channel
     case chan' of
          Just chan'' -> do
-             Just buf' <- get radio :: Application (Maybe (Buffer ByteString))
+             Just buf' <- getD radio :: Application (Maybe (Buffer ByteString))
              duplicate <- liftIO $ dupChan chan''
              start <- liftIO $ S.fromByteString successRespo
              input <- liftIO $ S.chanToInput duplicate
              birst <- liftIO $ getAll buf'
-             say $ "from birst" ++ (Prelude.show $ length birst)
+             say $ show $ "from birst" ++ (Prelude.show $ length birst)
              birst' <- liftIO $ S.fromByteString birst
              withoutMeta <- liftIO $ S.concatInputStreams [ birst', input ]
-             state <- ask
+             stateR <- ask
+             stateS <- get
              let getMeta :: IO (Maybe Meta)
-                 getMeta = runReaderT (get radio) state
+                 getMeta = do (r, _, Logger w) <- runRWST (getD radio) stateR stateS
+                              appendFile logFile w
+                              return r
              say "supply start"
              liftIO $ S.supply start oS
              say "supply end"
@@ -118,8 +129,8 @@ makeClient oS radio = do
       whenGood _ = return ()
 
 
-emptyState::IO RadioStore
-emptyState = do
+emptyStateR::IO RadioStore
+emptyStateR = do
     host <- getHostName
     a <- newMVar Map.empty
     return $ Store a (Just (host, 2000))

@@ -31,8 +31,8 @@ import           System.IO.Streams                        as S
 import           System.IO.Streams.Attoparsec             as S
 import           System.IO.Streams.Concurrent             as S
 
-import           Control.Monad.Reader
-import qualified Control.Monad.Reader                     as R
+import           Control.Monad.RWS.Lazy
+import qualified Control.Monad.RWS.Lazy                   as M
 
 import           Blaze.ByteString.Builder                 (Builder)
 import qualified Blaze.ByteString.Builder                 as Builder
@@ -47,20 +47,24 @@ import           Radio.Data
 import Control.Applicative hiding (empty)
 import Debug.Trace
 
-say :: (Show a, MonadIO m) => a -> m ()
-say = liftIO . print
+say x = tell . Logger $ x ++ "\n"
 
 save :: Allowed m => Prelude.FilePath -> m ()
 save path = do
     l <- list :: Allowed m => m [Radio]
+    say "save radio station"
+    M.mapM_ (\x -> say $ show x ) l
     liftIO $ LS.writeFile path $ encode l
 
 load :: Allowed m => Prelude.FilePath -> m ()
 load path = do
     l <- liftIO $ LS.readFile path
     let radio  = decode l :: [Radio]
-    _ <- R.mapM_ create radio
+    say "load next radio station"
+    M.mapM_ (\x -> say $ show x) radio
+    _ <- M.mapM_ create radio
     return ()
+    
 
 -- | создаем канал
 makeChannel::Radio -> Application ()
@@ -71,26 +75,28 @@ makeChannel radio = do
     where
       whenError x = do
           say $ "Error when connection: " ++ show x
-          set radio $ (Nothing :: Maybe (Chan (Maybe ByteString)))
+          setD radio $ (Nothing :: Maybe (Chan (Maybe ByteString)))
       whenGood radioStreamInput' = do
           say "start good"
-          state <- ask
+          stateR <- ask
+          stateS <- get
           let saveMeta :: Maybe Meta -> IO ()
-              saveMeta x = runReaderT (set radio x) state
+              saveMeta x = do (_, _, Logger w) <- runRWST (setD radio x) stateR stateS
+                              appendFile logFile w
           chan <- liftIO $ newChan
           buf' <- liftIO $ new 60 :: Application (Buffer ByteString)
-          set radio (Just buf')
-          metaInt <- unpackMeta <$> (lookupHeader "icy-metaint" <$> get radio) :: Application (Maybe Int)
+          setD radio (Just buf')
+          metaInt <- unpackMeta <$> (lookupHeader "icy-metaint" <$> getD radio) :: Application (Maybe Int)
           say "have meta int"
-          say metaInt
+          say $ show metaInt
           chanStreamOutput <- liftIO $ S.chanToOutput chan
           chanStreamInput  <- liftIO $ S.chanToInput  chan
           outputBuffer <- liftIO $ bufferToOutput buf'
           say "have output buffer"
           (p1,p2) <- liftIO $ connectWithRemoveMetaAndBuffering metaInt saveMeta 8192 radioStreamInput' chanStreamOutput
           p3 <-  liftIO $ forkIO $ S.connect chanStreamInput outputBuffer
-          set radio $ Status 0 (Just p1) (Just p2) (Just p3)
-          set radio (Just chan :: Maybe (Chan (Maybe ByteString)))
+          setD radio $ Status 0 (Just p1) (Just p2) (Just p3)
+          setD radio (Just chan :: Maybe (Chan (Maybe ByteString)))
           -- | @TODO save pid
           return ()
       unpackMeta :: [ByteString] -> Maybe Int
@@ -205,20 +211,20 @@ makeConnect radio = do
          Id -> say "bad radio" >> undefined
          Proxy -> do
              (i, o) <- openConnection radio
-             Url u <- get radio
+             Url u <- getD radio
              let Right path = parseOnly parsePath u
                  req = "GET " <> path <> " HTTP/1.0\r\nicy-metadata: 1\r\n\r\n"
              say "url from radio"
-             say u
+             say $ show u
              say "request to server"
-             say req
+             say $ show req
              getStream <- liftIO $ S.fromByteString req
              liftIO $ S.connect getStream o
              (response', headers') <- liftIO $ S.parseFromStream response i
              -- | @TODO обработать исключения
-             set radio headers'
-             say response'
-             say headers'
+             setD radio headers'
+             say $ show response'
+             say $ show headers'
              say "makeConnect end"
              return i
 
@@ -241,12 +247,12 @@ genStream x = do
 -- | открываем соединение до стрим сервера
 openConnection :: Radio -> Application (InputStream ByteString, OutputStream ByteString)
 openConnection radio = do
-    Url url' <- get radio
+    Url url' <- getD radio
     let Right (hb, pb) = parseOnly parseUrl url'
         h = C.unpack hb
         p = C.unpack pb
-    say h
-    say p
+    say $ show h
+    say $ show p
     is <- liftIO $ getAddrInfo (Just hints) (Just h) (Just p)
     let addr = head is
     let a = addrAddress addr
@@ -263,10 +269,10 @@ openLocalStream radio = do
     liftIO $ concatInputStreams l
 
 oneSongStream radio = do
-    playList' <- get radio :: Application (Cycle Song)
+    playList' <- getD radio :: Application (Cycle Song)
     let Song _ toPlay = getValue playList'
         newPlayList = goRight playList'
-    set radio newPlayList
+    setD radio newPlayList
     bs <-  liftIO $ BS.readFile toPlay
     liftIO $ fromByteString bs
 
@@ -342,8 +348,8 @@ instance Allowed m => Storable m Radio where
     --
     radioType a = do
         radio <- info a >>= liftIO . getter id 
-        liftIO $ print "radioType"
-        liftIO $ print radio
+        say "radioType"
+        say $ show radio
         case radio of
              Local {} -> return LocalFiles
              RI {} -> return Proxy
@@ -363,32 +369,32 @@ setter :: (Radio -> Radio) -> MVar Radio -> IO ()
 setter x  =  flip modifyMVar_ (return . x)  
 
 instance Allowed m => Detalization m Url where
-    get radio = info radio >>= liftIO . getter url
-    set radio a = info radio >>= liftIO . setter (\y -> y { url = a })
+    getD radio = info radio >>= liftIO . getter url
+    setD radio a = info radio >>= liftIO . setter (\y -> y { url = a })
 
 instance Allowed m => Detalization m Status where
-    get radio = info radio >>= liftIO . getter pid
-    set radio a = info radio >>= liftIO . setter (\y -> y { pid = a })
+    getD radio = info radio >>= liftIO . getter pid
+    setD radio a = info radio >>= liftIO . setter (\y -> y { pid = a })
 
 instance Allowed m => Detalization m Headers where
-    get radio = info radio >>= liftIO . getter headers
-    set radio a = info radio >>= liftIO . setter (\y -> y { headers = a })
+    getD radio = info radio >>= liftIO . getter headers
+    setD radio a = info radio >>= liftIO . setter (\y -> y { headers = a })
 
 instance Allowed m => Detalization m Channel where
-    get radio = info radio >>= liftIO . getter channel
-    set radio a = info radio >>= liftIO . setter (\y -> y { channel = a })
+    getD radio = info radio >>= liftIO . getter channel
+    setD radio a = info radio >>= liftIO . setter (\y -> y { channel = a })
 
 instance Allowed m => Detalization m (Maybe Meta) where
-    get radio = info radio >>= liftIO . getter meta
-    set radio (Just (Meta ("",0))) = return ()
-    set radio a = info radio >>= liftIO . setter (\y -> y { meta = a })
+    getD radio = info radio >>= liftIO . getter meta
+    setD radio (Just (Meta ("",0))) = return ()
+    setD radio a = info radio >>= liftIO . setter (\y -> y { meta = a })
 
 instance Allowed m => Detalization m (Maybe (Buffer ByteString)) where
-    get radio = info radio >>= liftIO . getter buff
-    set radio a = info radio >>= liftIO . setter (\y -> y { buff = a})
+    getD radio = info radio >>= liftIO . getter buff
+    setD radio a = info radio >>= liftIO . setter (\y -> y { buff = a})
 
 instance Allowed m => Detalization m (Cycle Song) where
-    get radio = info radio >>= liftIO . getter playList
-    set radio a = info radio >>= liftIO . setter (\y -> y { playList = a })
+    getD radio = info radio >>= liftIO . getter playList
+    setD radio a = info radio >>= liftIO . setter (\y -> y { playList = a })
 
 
