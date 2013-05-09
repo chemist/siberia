@@ -259,33 +259,32 @@ getStream radio = do
 
          openLocalStream :: Radio -> Application (InputStream ByteString)
          openLocalStream radio = do
-             st <- get
-             rs <- ask
-             setD radio (Just $ Meta ("", 0))
-             stIO <- liftIO $ newIORef Nothing
-             liftIO $ makeInputStream $ f st rs stIO
+             state <- get
+             reader <- ask
+             handleIO <- liftIO $ newIORef Nothing
+             liftIO $ makeInputStream $ f state reader handleIO
              where
-               ls = do
+               getNextSong = do
                    playList' <- getD radio :: Application Playlist
-                   let Song _ toPlay = getValue playList'
+                   let Song _ file = getValue playList'
                        newPlayList = goRight playList'
                    setD radio newPlayList
-                   return toPlay
-               f st rs stIO = do
-                   stI <- readIORef stIO
-                   case stI of
+                   return file
+               f state reader handleIO = do
+                   maybeHandle <- readIORef handleIO
+                   case maybeHandle of
                         Nothing -> do
-                            (file, w) <- evalRWST ls rs st
+                            (file, _) <- evalRWST getNextSong reader state
                             handler <- openBinaryFile file ReadMode
-                            writeIORef stIO $ Just handler
-                            f st rs stIO
+                            writeIORef handleIO $ Just handler
+                            f state reader handleIO
                         Just h -> do
                             bs <- BS.hGetSome h bUFSIZ
                             threadDelay 10000
                             if (BS.null bs)
                                then do
-                                   writeIORef stIO $ Nothing
-                                   f st rs stIO
+                                   writeIORef handleIO $ Nothing
+                                   f state reader handleIO
                                else return $! Just bs
 
 bUFSIZ = 32752
