@@ -69,14 +69,18 @@ main = do
 
 connectHandler::(InputStream ByteString, OutputStream ByteString) -> Application ()
 connectHandler (iS, oS) = do
+    -- если запрос сильно большой кидаем исключение
     sized <- liftIO $ S.throwIfProducesMoreThan 2048 iS
+    -- пробуем парсить запрос
     result <- try $ liftIO $ S.parseFromStream request sized :: Application (Either SomeException (Request, Headers))
     either whenError whenGood result
 
     where
+    
     whenError s
       | showType s == "TooManyBytesReadException" = liftIO $ S.write (Just "ICY 414 Request-URI Too Long\r\n") oS
       | otherwise                                = liftIO $ S.write (Just "ICY 400 Bad Request\r\n") oS
+      
     whenGood (request', headers') = do
         let channel' = ById (RadioId $ requestUri request')
         is <- member $ channel'
