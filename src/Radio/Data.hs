@@ -1,10 +1,9 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts       #-}
+{-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE MultiParamTypeClasses  #-}
+{-# LANGUAGE OverloadedStrings      #-}
+{-# LANGUAGE TypeSynonymInstances   #-}
 
 module Radio.Data where
 
@@ -12,28 +11,28 @@ import           BasicPrelude                 hiding (concat, mapM)
 import           Prelude                      ()
 import qualified Prelude
 
-import           Control.Concurrent           (Chan, MVar, newMVar, ThreadId)
+import           Control.Concurrent           (Chan, MVar, ThreadId, newMVar)
 import           Data.Aeson                   (FromJSON (..), ToJSON (..),
                                                Value (..), object, (.:), (.=))
-import qualified Data.Map as Map
 import           Data.Attoparsec.RFC2616      (Header (..))
 import           Data.ByteString              (concat)
 import qualified Data.ByteString              as BS
 import           Data.ByteString.Char8        (pack)
+import qualified Data.Map                     as Map
 import           Network.Socket               (HostName)
 
+import           Blaze.ByteString.Builder     (Builder)
+import           Control.Monad.RWS.Lazy
+import           Data.Binary                  (Binary, Get)
+import qualified Data.Binary                  as B
+import qualified Data.Collections             as Collections
+import           Data.Cycle
+import           Data.IORef
+import qualified Data.Map                     as M
+import           Snap.Core                    (Snap)
 import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
-import Control.Monad.RWS.Lazy
-import           Snap.Core           (Snap)
-import qualified Data.Binary as B
-import Data.Binary (Binary, Get)
-import Data.IORef
-import Data.Cycle
-import qualified Data.Collections as Collections
-import Blaze.ByteString.Builder (Builder)
-import qualified Data.Map as M
 
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
@@ -42,16 +41,16 @@ newtype Meta = Meta (ByteString, Int) deriving (Show, Ord, Eq)
 type Headers = [Header]
 type HostPort = Maybe (HostName, Int)
 type Channel = Maybe (Chan (Maybe ByteString))
-   
+
 port :: Int
 port = 2000
 
 data RadioType = LocalFiles | Proxy | Id
 
-data Status = Status { connections    :: Int
-                     , connectProcess :: Maybe ThreadId
-                     , bufferProcess  :: Maybe ThreadId
-                     , chanProcess    :: Maybe ThreadId
+data Status = Status { connections          :: Int
+                     , connectProcess       :: Maybe ThreadId
+                     , bufferProcess        :: Maybe ThreadId
+                     , chanProcess          :: Maybe ThreadId
                      , connectionsProcesses :: [ThreadId]
                      } deriving (Eq)
 
@@ -71,17 +70,17 @@ data RadioInfo x = RI { rid      :: x
                       }
                   | ById { rid :: x } deriving (Eq)
 
-data Song = Song { sidi :: Int
+data Song = Song { sidi  :: Int
                  , spath :: String
                  } deriving (Eq)
-                 
+
 type Playlist = Cycle Song
 
 instance Ord Song where
     compare x y = compare (sidi x) (sidi y)
-   
 
-                      
+
+
 type Radio = RadioInfo RadioId
 type AllPlaylist = M.Map RadioId (MVar Playlist)
 
@@ -89,7 +88,7 @@ data Store a = Store (MVar (Map RadioId (MVar a))) HostPort (MVar AllPlaylist)
 
 type State = AllPlaylist
 
-type RadioStore = Store Radio 
+type RadioStore = Store Radio
 
 newtype Logger = Logger Text
 
@@ -99,13 +98,13 @@ instance Monoid Logger where
 
 type Application = RWST RadioStore Logger State IO
 
-type Web = RWST RadioStore Logger State Snap 
+type Web = RWST RadioStore Logger State Snap
 
 data Buffer a = Buffer { active :: IORef (Cycle Int)
                        , buf    :: IORef (Cycle (IORef a))
                        , size   :: IORef Int
                        } deriving (Eq)
-                       
+
 class Monoid a => RadioBuffer m a where
     -- ** создание буфера указанного размера
     new       :: Int -> IO (m a)
@@ -126,10 +125,10 @@ runWeb mw r s = do (a, _, Logger w) <- runRWST mw r s
                    return a
 
 
-class (Monad m, MonadIO m, MonadReader RadioStore m, MonadWriter Logger m, MonadState State m) => Allowed m 
+class (Monad m, MonadIO m, MonadReader RadioStore m, MonadWriter Logger m, MonadState State m) => Allowed m
 
-instance Allowed Application 
-instance Allowed Web 
+instance Allowed Application
+instance Allowed Web
 
 class Storable m a where
     -- ** проверка наличия радиостанции
@@ -144,11 +143,11 @@ class Storable m a where
     info   :: a -> m (MVar a)
     -- ** возвращает MVar Playlist если определенн
     playlist :: a -> m (Maybe (MVar Playlist))
-    
+
 class Detalization m a where
     getD :: Radio -> m a
     setD :: Radio -> a -> m ()
-    
+
 instance Show Radio where
     show (ById x) = Prelude.show x
     show x = Prelude.show (rid x) ++ Prelude.show (url x) ++ Prelude.show (hostPort x)
@@ -185,7 +184,7 @@ instance ToJSON Status where
 
 addSlash::RadioId -> RadioId
 addSlash (RadioId x) = RadioId $ concat ["/", x]
-   
+
 
 
 instance ToJSON RadioId where
@@ -193,15 +192,15 @@ instance ToJSON RadioId where
 
 instance ToJSON Url where
     toJSON (Url x) = toJSON x
-    
+
 instance Binary Url where
     put (Url x) = B.put x
     get = Url <$> B.get
-    
+
 instance Binary RadioId where
     put (RadioId x) = B.put x
     get = RadioId <$> B.get
- 
+
 instance Binary Radio where
     put x = do
         B.put $ rid x
@@ -209,6 +208,6 @@ instance Binary Radio where
     get = do
         r <- B.get :: Get RadioId
         u <- B.get :: Get Url
-        return $ RI r u defStatus [] Nothing Nothing Nothing Nothing 
+        return $ RI r u defStatus [] Nothing Nothing Nothing Nothing
 
 

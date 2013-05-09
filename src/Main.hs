@@ -29,17 +29,17 @@ import           System.IO.Streams.Concurrent as S
 
 import           Data.Attoparsec.RFC2616      (Request (..), request)
 
-import           Control.Monad.RWS.Lazy hiding (listen, getAll)
-import           Radio.Internal 
+import           Control.Monad.RWS.Lazy       hiding (getAll, listen)
+import qualified Data.Collections             as Collections
+import           Radio.Internal
 import           Radio.Web                    (web)
 import           Snap.Http.Server             (quickHttpServe)
-import qualified Data.Collections as Collections
 
 
--- import qualified  Control.Distributed.Process as P 
+-- import qualified  Control.Distributed.Process as P
 -- import qualified  Control.Distributed.Process.Node as P
 -- import qualified  Control.Distributed.Process.Backend.SimpleLocalnet as P
--- 
+--
 
 emptyStateS = return $ Map.empty
 
@@ -65,7 +65,7 @@ main = do
                     appendFile logFile w
     sClose sock
     return ()
-    
+
 
 connectHandler::(InputStream ByteString, OutputStream ByteString) -> Application ()
 connectHandler (iS, oS) = do
@@ -112,12 +112,7 @@ makeClient oS radio = do
              say $ show $ "from birst" ++ (Prelude.show $ length birst)
              birst' <- liftIO $ S.fromByteString birst
              withoutMeta <- liftIO $ S.concatInputStreams [ birst', input ]
-             stateR <- ask
-             stateS <- get
-             let getMeta :: IO (Maybe Meta)
-                 getMeta = do (r, _, Logger w) <- runRWST (getD radio) stateR stateS
-                              appendFile logFile w
-                              return r
+             getMeta <- return <$> getD radio :: Application (IO (Maybe Meta))
              say "supply start"
              liftIO $ S.supply start oS
              say "supply end"

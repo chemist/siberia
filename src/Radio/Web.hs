@@ -13,18 +13,18 @@ import           Snap.Core           (Method (..), Snap, dir, emptyResponse,
 import           Snap.Http.Server    (quickHttpServe)
 import           Snap.Util.FileServe (serveDirectory, serveFile)
 
-import           Radio.Internal     
+import           Radio.Internal
 
 web :: Web ()
-web =  ifTop (serveFile "static/index.html") 
+web =  ifTop (serveFile "static/index.html")
        <|> method GET ( route [ ("server/stats", statsHandler )
                               , ("stream", getStreamHandler )
                               , ("stream/:sid", streamHandlerById )
                               , ("stream/:sid/metadata", streamMetaHandler )
                               , ("stream/:sid/stats", streamStatsHandler )
                               , ("save", saveHandler)
-                              ] )                                              
-       <|> method POST ( route [ ("stream/:sid", postStreamHandler ) ] )     
+                              ] )
+       <|> method POST ( route [ ("stream/:sid", postStreamHandler ) ] )
        <|> method DELETE ( route [ ("stream/:sid", deleteStreamHandler ) ] )
        <|> dir "static" (serveDirectory "./static")
 

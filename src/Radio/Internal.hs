@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns           #-}
 {-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE OverloadedStrings      #-}
@@ -20,8 +19,8 @@ import           Prelude                                  ()
 import qualified Prelude
 
 import           Data.Attoparsec                          (parseOnly)
+import qualified Data.Attoparsec                          as A
 import           Data.Attoparsec.RFC2616
-import qualified Data.Attoparsec as A
 import qualified Data.ByteString                          as BS
 import qualified Data.ByteString.Char8                    as C
 import qualified Data.ByteString.Lazy                     as LS
@@ -29,6 +28,7 @@ import           Data.Maybe                               (fromJust)
 import           Network.Socket
 import           System.IO.Streams                        as S
 import           System.IO.Streams.Attoparsec             as S
+import           System.IO.Streams.Combinators            as S
 import           System.IO.Streams.Concurrent             as S
 
 import           Control.Monad.RWS.Lazy
@@ -36,16 +36,18 @@ import qualified Control.Monad.RWS.Lazy                   as M
 
 import           Blaze.ByteString.Builder                 (Builder)
 import qualified Blaze.ByteString.Builder                 as Builder
-import           Blaze.ByteString.Builder.Internal.Buffer
-                                                           (allNewBuffersStrategy)
-import           Data.Binary                              (encode, decode)
+import           Blaze.ByteString.Builder.Internal.Buffer (allNewBuffersStrategy)
+import           Control.Applicative                      hiding (empty)
+import           Data.Binary                              (decode, encode)
 import qualified Data.Collections                         as Collections
 import           Data.Cycle
 import           Data.IORef
 import           Data.Text.Encoding                       as E
+import           Debug.Trace
 import           Radio.Data
-import Control.Applicative hiding (empty)
-import Debug.Trace
+import           System.IO                                (Handle, IOMode (..),
+                                                           hClose,
+                                                           openBinaryFile)
 
 say x = tell . Logger $ x ++ "\n"
 
@@ -64,7 +66,7 @@ load path = do
     M.mapM_ (\x -> say $ show x) radio
     _ <- M.mapM_ create radio
     return ()
-    
+
 
 -- | создаем канал
 makeChannel::Radio -> Application ()
@@ -97,6 +99,7 @@ makeChannel radio = do
           p3 <-  liftIO $ forkIO $ S.connect chanStreamInput outputBuffer
           setD radio $ Status 0 (Just p1) (Just p2) (Just p3) []
           setD radio (Just chan :: Maybe (Chan (Maybe ByteString)))
+          say "finish output buffer"
           -- | @TODO save pid
           return ()
       unpackMeta :: [ByteString] -> Maybe Int
@@ -104,7 +107,7 @@ makeChannel radio = do
           m <- listToMaybe meta'
           (a,_) <- C.readInt m
           return a
-          
+
 connectWithRemoveMetaAndBuffering ::Maybe Int                -- ^ meta int
                                   -> (Maybe Meta -> IO ())   -- ^ запись мета информации в состояние
                                   -> Int                      -- ^ размер чанка для буферизированного вывода
@@ -128,12 +131,12 @@ connectWithRemoveMetaAndBuffering (Just metaInt) saveMeta buffSize is os = do
 {-# INLINE connectWithRemoveMetaAndBuffering #-}
 
 toBuilder :: A.Parser (Maybe Builder)
-toBuilder = (A.endOfInput >> pure Nothing) <|> Just . Builder.fromByteString <$> A.take 4096 
+toBuilder = (A.endOfInput >> pure Nothing) <|> Just . Builder.fromByteString <$> A.take 32752
 
 metaParser :: Int -> A.Parser (Maybe (Builder, Meta))
 metaParser metaInt = (A.endOfInput >> pure Nothing) <|> Just <$> do
     body <- A.take metaInt
-    len <- toLen <$> A.take 1 
+    len <- toLen <$> A.take 1
     meta <- A.take len
     return (Builder.fromByteString body, Meta (meta, len))
 
@@ -160,11 +163,13 @@ connectWithAddMetaAndBuffering Nothing _ buffSize is os = do
 connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
     builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
     chunked <- S.parserToInputStream (toChunks metaInt) is
-    metas   <- S.makeInputStream getMeta
-    refMeta <- newIORef $ Just (Meta ("",0))
+    metas   <- S.makeInputStream $ do
+        m <- getMeta
+        return $ Just $ maybe (Meta ("", 0)) id m
+    refMeta <- newIORef $ Just (Meta ("", 0))
     withMeta <- S.zipWithM (fun refMeta) chunked metas
     S.connect withMeta builder
-    where 
+    where
     fun:: IORef (Maybe Meta) -> Chunk -> Meta -> IO Builder
     fun ref (Chunk bs) (Meta (meta', len)) = do
         result <- atomicModifyIORef ref (check meta' len)
@@ -174,14 +179,14 @@ connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
 
     check :: ByteString -> Int -> Maybe Meta -> (Maybe Meta, Bool)
     check _ _ Nothing = (Nothing, False)
-    check bs nl (Just (Meta (m, l))) = 
-      if bs == m 
+    check bs nl (Just (Meta (m, l))) =
+      if bs == m
          then (Just (Meta (m,l)), False)
          else (Just (Meta (bs,nl)), True)
 
     fromLen :: Int -> ByteString
     fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16)
-    
+
     zero :: ByteString
     zero = BS.pack $ [toEnum 0]
 
@@ -201,7 +206,7 @@ getStream (ById (RadioId "/test")) = liftIO $ S.fromGenerator $ genStream fakeRa
   where
     fakeRadioStream' :: [ByteString]
     fakeRadioStream' = BasicPrelude.map (\x -> (E.encodeUtf8 . show) x <> " ") [1.. ]
-    
+
     genStream :: [ByteString] -> S.Generator ByteString ()
     genStream x = do
         let (start, stop) = splitAt 1024 x
@@ -251,24 +256,40 @@ getStream radio = do
              return (i, o)
              where
                 hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
-         
+
          openLocalStream :: Radio -> Application (InputStream ByteString)
          openLocalStream radio = do
-             let 
-                 ls = do
-                     playList' <- getD radio :: Application Playlist
-                     let Song _ toPlay = getValue playList'
-                         newPlayList = goRight playList'
-                     setD radio newPlayList
-                     r <- liftIO $ BS.readFile toPlay
-                     tell $ Logger "one"
-                     return $ Just r
              st <- get
              rs <- ask
-             liftIO $ makeInputStream $ do
-                 (a, w) <- evalRWST ls rs st
-                 return a
-         
+             setD radio (Just $ Meta ("", 0))
+             stIO <- liftIO $ newIORef Nothing
+             liftIO $ makeInputStream $ f st rs stIO
+             where
+               ls = do
+                   playList' <- getD radio :: Application Playlist
+                   let Song _ toPlay = getValue playList'
+                       newPlayList = goRight playList'
+                   setD radio newPlayList
+                   return toPlay
+               f st rs stIO = do
+                   stI <- readIORef stIO
+                   case stI of
+                        Nothing -> do
+                            (file, w) <- evalRWST ls rs st
+                            handler <- openBinaryFile file ReadMode
+                            writeIORef stIO $ Just handler
+                            f st rs stIO
+                        Just h -> do
+                            bs <- BS.hGetSome h bUFSIZ
+                            threadDelay 10000
+                            if (BS.null bs)
+                               then do
+                                   writeIORef stIO $ Nothing
+                                   f st rs stIO
+                               else return $! Just bs
+
+bUFSIZ = 32752
+
 instance Monoid a => RadioBuffer Buffer a where
     new n = do
         l <-  sequence $ replicate n (newIORef empty :: Monoid a => IO (IORef a))
@@ -342,10 +363,10 @@ addHostPort hp x = x { hostPort = hp }
 
 -- | helpers
 getter ::(Radio -> a) -> MVar Radio -> IO a
-getter x =  flip  withMVar (return . x)  
+getter x =  flip  withMVar (return . x)
 
 setter :: (Radio -> Radio) -> MVar Radio -> IO ()
-setter x  =  flip modifyMVar_ (return . x)  
+setter x  =  flip modifyMVar_ (return . x)
 
 instance Allowed m => Detalization m Url where
     getD radio = info radio >>= liftIO . getter url
