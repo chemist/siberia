@@ -2,6 +2,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE TypeSynonymInstances   #-}
+{-# LANGUAGE BangPatterns   #-}
 module Radio.Internal (
   module Radio.Data
   , makeChannel
@@ -48,6 +49,7 @@ import           Radio.Data
 import           System.IO                                (Handle, IOMode (..),
                                                            hClose,
                                                            openBinaryFile)
+import qualified System.Process                           as P
 
 say x = tell . Logger $ x ++ "\n"
 
@@ -270,6 +272,25 @@ getStream radio = do
                        newPlayList = goRight playList'
                    setD radio newPlayList
                    return file
+               f:: State -> RadioStore -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
+               f state reader channelIO = do
+                   maybeCh <- readIORef channelIO
+                   case maybeCh of
+                        Nothing -> do
+                            (file, _) <- evalRWST getNextSong reader state
+                            print "Nothing"
+                            print file
+                            channel <- runFFmpeg file
+                            writeIORef channelIO $ Just channel
+                            f state reader channelIO
+                        Just ch -> do
+                            !chunk <- S.read ch
+                            case chunk of
+                                 Just c -> return $! Just c
+                                 Nothing -> do
+                                     writeIORef channelIO Nothing
+                                     f state reader channelIO
+               {-
                f state reader handleIO = do
                    maybeHandle <- readIORef handleIO
                    case maybeHandle of
@@ -286,8 +307,29 @@ getStream radio = do
                                    writeIORef handleIO $ Nothing
                                    f state reader handleIO
                                else return $! Just bs
+                -}
 
 bUFSIZ = 32752
+
+command :: String
+command = "ffmpeg -re -i - -f mp3 -acodec copy -"
+
+
+runFFmpeg ::String ->  IO (S.InputStream BS.ByteString)
+runFFmpeg filename = do
+    (i, o, e, ph ) <- S.runInteractiveCommand command
+    forkIO $ do nullOutput <- S.nullOutput
+                S.withFileAsInput filename (fun i) 
+                S.connect e nullOutput
+                exitCode <- P.waitForProcess ph
+                print exitCode 
+                print "next song"
+    return o
+    where fun :: S.OutputStream BS.ByteString -> S.InputStream BS.ByteString -> IO ()
+          fun os is = S.connect is os
+    
+
+
 
 instance Monoid a => RadioBuffer Buffer a where
     new n = do

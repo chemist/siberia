@@ -133,7 +133,7 @@ emptyStateR::IO RadioStore
 emptyStateR = do
     host <- getHostName
     a <- newMVar Map.empty
-    playlist' <- newMVar $ Collections.fromList[Song 1 "music.mp3"]
+    playlist' <- newMVar $ Collections.fromList[Song 1 "music.mp3", Song 2 "music.mp3"]
     allPlaylist <- newMVar $ Map.fromList [(RadioId "/local", playlist')]
     return $ Store a (Just (host, 2000)) allPlaylist
 
