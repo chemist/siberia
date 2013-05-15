@@ -41,7 +41,18 @@ import           Snap.Http.Server             (quickHttpServe)
 -- import qualified  Control.Distributed.Process.Backend.SimpleLocalnet as P
 --
 
+musicFolder = "./music/"
+
 emptyStateS = return $ Map.empty
+
+emptyStateR::IO RadioStore
+emptyStateR = do
+    host <- getHostName
+    a <- newMVar Map.empty
+    playlist' <- newMVar $ Collections.fromList[]
+    allPlaylist <- newMVar $ Map.fromList [(RadioId "/local", playlist')]
+    return $ Store a (Just (host, 2000)) allPlaylist
+
 
 main::IO ()
 main = do
@@ -76,11 +87,11 @@ connectHandler (iS, oS) = do
     either whenError whenGood result
 
     where
-    
+
     whenError s
       | showType s == "TooManyBytesReadException" = liftIO $ S.write (Just "ICY 414 Request-URI Too Long\r\n") oS
       | otherwise                                = liftIO $ S.write (Just "ICY 400 Bad Request\r\n") oS
-      
+
     whenGood (request', headers') = do
         let channel' = ById (RadioId $ requestUri request')
         is <- member $ channel'
@@ -127,15 +138,6 @@ makeClient oS radio = do
     where
       whenError s = say $ "catched: " ++ show s
       whenGood _ = return ()
-
-
-emptyStateR::IO RadioStore
-emptyStateR = do
-    host <- getHostName
-    a <- newMVar Map.empty
-    playlist' <- newMVar $ Collections.fromList[Song 1 "music.mp3", Song 2 "music.mp3"]
-    allPlaylist <- newMVar $ Map.fromList [(RadioId "/local", playlist')]
-    return $ Store a (Just (host, 2000)) allPlaylist
 
 successRespo :: ByteString
 successRespo = concat [ "ICY 200 OK\r\n"

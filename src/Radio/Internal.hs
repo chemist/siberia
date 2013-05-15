@@ -270,8 +270,9 @@ getStream radio = do
                    playList' <- getD radio :: Application Playlist
                    let Song _ file = getValue playList'
                        newPlayList = goRight playList'
+                       RadioId channelDir = rid radio
                    setD radio newPlayList
-                   return file
+                   return $ musicDirectory ++ (tail $ C.unpack channelDir) ++ "/" ++ file
                f:: State -> RadioStore -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
                f state reader channelIO = do
                    maybeCh <- readIORef channelIO
@@ -441,5 +442,19 @@ instance Allowed m => Detalization m Playlist where
     setD radio a = do
         Just playlistMVar <- playlist radio
         liftIO $ modifyMVar_ playlistMVar $ \_ -> return a
+        
+instance Allowed m => Detalization m Song where
+    getD radio = do
+        Just playlistMVar <- playlist radio
+        liftIO $ withMVar playlistMVar $ \x -> do
+            case Collections.size x of
+                 0 -> return $ Song (-1) ""
+                 _ ->  return $ Collections.maximum x
+    setD radio (Song _ song) = do
+        Just playlistMVar <- playlist radio
+        m <- getD radio
+        liftIO $ modifyMVar_ playlistMVar $ \pl -> do
+            return $ Collections.insert (Song (1 + sidi m) song) pl 
+   
 
 

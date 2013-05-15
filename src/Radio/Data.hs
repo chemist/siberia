@@ -34,6 +34,9 @@ import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
 
+tempDir = "./.music/"
+musicDirectory = "./music/"
+
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
 newtype Meta = Meta (ByteString, Int) deriving (Show, Ord, Eq)
@@ -72,7 +75,7 @@ data RadioInfo x = RI { rid      :: x
 
 data Song = Song { sidi  :: Int
                  , spath :: String
-                 } deriving (Eq)
+                 } deriving (Eq, Show)
 
 type Playlist = Cycle Song
 
@@ -173,6 +176,19 @@ instance FromJSON Radio where
 instance ToJSON (Maybe Meta) where
     toJSON (Just (Meta (bs,_))) = object [ "meta" .=  (toJSON $ BS.takeWhile (/= toEnum 0) bs) ]
     toJSON Nothing = object [ "meta" .=  toJSON BS.empty ]
+    
+
+instance ToJSON Song where
+    toJSON x = object [ "position" .= (toJSON . sidi) x
+                      , "file"     .= (toJSON . spath) x
+                      ]
+                      
+instance FromJSON Song where
+    parseJSON (Object x) = Song <$> x .: "position" <*> x .: "file"
+    
+
+instance ToJSON Playlist where
+    toJSON x = toJSON . Collections.toList $ x
 
 instance ToJSON Status where
     toJSON (Status i (Just _) _ _ _) = object [ "connections" .= toJSON i
