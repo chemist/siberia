@@ -37,6 +37,9 @@ import           System.IO.Streams.Concurrent as S
 tempDir = "./.music/"
 musicDirectory = "./music/"
 
+limitSizeForUpload :: Int64
+limitSizeForUpload = 10000000
+
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
 newtype Url = Url ByteString deriving (Show, Ord, Eq)
 newtype Meta = Meta (ByteString, Int) deriving (Show, Ord, Eq)

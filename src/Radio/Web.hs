@@ -24,7 +24,7 @@ import           Snap.Util.FileUploads
 import           System.Directory
 import qualified Data.Text as T
 import Data.Maybe (isJust, fromJust)
-import Data.List (sort)
+import Data.List (sort, reverse)
 
 
 web :: Web ()
@@ -34,14 +34,15 @@ web =  ifTop (serveFile "static/index.html")
                               , ("stream/:sid", streamHandlerById )
                               , ("stream/:sid/metadata", streamMetaHandler )
                               , ("stream/:sid/stats", streamStatsHandler )
-                              , ("song/:sid",         getSongList)
+                              , ("playlist/:sid",         getPlaylist)
                               , ("save", saveHandler)
                               ] )
        <|> method POST ( route [ ("stream/:sid", postStreamHandler )
+                               , ("playlist/:sid", changePlaylist)
                                , ("song/:sid"  , postSongAdd)
                                ] )
        <|> method DELETE ( route [ ("stream/:sid", deleteStreamHandler ) 
-                                 , ("song/:sid" , deleteSong)
+                                 , ("song/:sid/:fid" , deleteSong)
                                  ] )
        <|> dir "static" (serveDirectory "./static")
 
@@ -66,25 +67,27 @@ postStreamHandler = do
                     then writeLBS $ encode infoWithHostPort
                     else errorWWW 400
 
-getSongList :: Web ()
-getSongList = do
+-- | get playlist
+-- curl http://localhost:8000/playlist/local                                                 
+-- [{"file":"music4.mp3","position":4},{"file":"music3.mp3","position":3},{"file":"music2.mp3","position":2}]
+getPlaylist :: Web ()
+getPlaylist = do
     sid <- getParam "sid"
     maybe (errorWWW 400) listSong sid
     where
       listSong :: ByteString -> Web ()
       listSong i = do
-          isInBase <- member (ById (RadioId $ "/" <> i))
+          isInBase <- member (toById i)
           unless isInBase $ errorWWW 403
-          list <- getD (ById (RadioId $ "/" <> i)) :: Web Playlist
+          list <- getD (toById i) :: Web Playlist
           writeLBS . encode $ list
 
 
 uploadPolicy :: UploadPolicy
-uploadPolicy = setMaximumFormInputSize 10000000 defaultUploadPolicy
+uploadPolicy = setMaximumFormInputSize limitSizeForUpload defaultUploadPolicy
 
--- upload
--- curl -F name=test -F filedata=@music.mp3  http://localhost:8000/song/local -v
-
+-- | upload file to server
+-- | curl -F name=test -F filedata=@music.mp3  http://localhost:8000/song/local -v
 postSongAdd :: Web ()
 postSongAdd = do
     sid <- getParam "sid"
@@ -96,11 +99,11 @@ postSongAdd = do
     where
       makePath :: ByteString -> Web ()
       makePath i = do
-          isInBase <- member (ById (RadioId $ "/" <> i))
+          isInBase <- member (toById i)
           unless isInBase $ errorWWW 403
           liftIO $ createDirectoryIfMissing True $ musicDirectory <> unpack i
       perPartUploadPolicy :: PartInfo -> PartUploadPolicy
-      perPartUploadPolicy part = trace (show part) $ allowWithMaximumSize 10000000
+      perPartUploadPolicy part = allowWithMaximumSize limitSizeForUpload
       handlerUploads :: String -> [(PartInfo, Either PolicyViolationException FilePath)] -> Web ()
       handlerUploads channelFolder x = do
           mapM_ fun x
@@ -110,30 +113,66 @@ postSongAdd = do
                     let Just filename = unpack <$> partFileName p
                     say . T.pack $ "\nupload file " ++ filename
                     liftIO $ renameFile path $ musicDirectory <> channelFolder <> "/" <> filename
-                    setD (ById (RadioId $ "/" <> (pack channelFolder))) $ Song 0 filename
+                    setD (toById (pack channelFolder)) $ Song (-1) filename
 
+-- | delete song from playlist
+-- dont remove file from filesystem
+--  DELETE request like http://localhost:8000/song/local/3
 deleteSong :: Web ()
 deleteSong = do
     sid <- getParam "sid"
-    song <- decode <$> readRequestBody 1024  :: Web (Maybe Song)
-    unless (isJust song) $ errorWWW 400
-    maybe (errorWWW 400) (rmSong $ fromJust song) sid
+    fid <- getParam "fid"
+    trace (show fid) $ case (sid, fid) of
+         (Just i, Just n) -> do
+             isInBase <- member (toById i)
+             unless isInBase $ errorWWW 403
+             case (reads $ unpack n) of
+                  [] -> errorWWW 400
+                  [(n', _)] -> rmSong (Song n' "") i
+                  _ -> errorWWW 400
+         _ -> errorWWW 400
     where 
       rmSong :: Song -> ByteString -> Web ()
       rmSong song i = do
-          isInBase <- member (ById (RadioId $ "/" <> i))
-          unless isInBase $ errorWWW 403
-          list <- getD (ById (RadioId $ "/" <> i)) :: Web Playlist
-          setD (ById (RadioId $ "/" <> i)) $ removeSongFromPlaylist song list
+          list <- getD (toById i) :: Web Playlist
+          setD (toById i) $ removeSongFromPlaylist song list
           errorWWW 200
+          
+-- | mv song in playlist
+-- curl http://localhost:8000/playlist/local -d '{"file":"music1.mp3","position":0}'
+-- return new playlist
+changePlaylist :: Web ()
+changePlaylist = do
+    sid <- getParam "sid"
+    song <- decode <$> readRequestBody 1024 :: Web (Maybe Song)
+    unless (isJust song) $ errorWWW 400
+    maybe (errorWWW 400) (mv $ fromJust song) sid
+    where
+      mv :: Song -> ByteString -> Web ()
+      mv song i = do
+          isInBase <- member (toById i)
+          unless isInBase $ errorWWW 403
+          list <- getD (toById i) :: Web Playlist
+          setD (toById i) $ moveSongInPlaylist song list
+          writeLBS . encode $ moveSongInPlaylist song list
+          
+    
           
 
 removeSongFromPlaylist :: Song -> Playlist -> Playlist
-removeSongFromPlaylist s p = let list = Collections.filter (/= s) p
+removeSongFromPlaylist s p = let list = Collections.filter (\(Song x _) -> x /= sidi s) p
                                  sortedPair = zip (sort $ Collections.toList list) [0 .. ]
-                             in Collections.fromList $ map (\(Song _ x, y) -> Song y x) sortedPair
+                             in Collections.fromAscList $ map (\(Song _ x, y) -> Song y x) sortedPair
+                             
 
-
+moveSongInPlaylist :: Song -> Playlist -> Playlist
+moveSongInPlaylist s@(Song position filename) p = let list = sort $ Collections.toList $ Collections.filter (\(Song _ f) -> f /= filename) p
+                                                      h = take position list
+                                                      t = drop position list
+                                                  in Collections.fromAscList $ map (\(Song _ x, y) -> Song y x) $ zip (h ++ [s] ++ t) [0 .. ]
+                                                    
+toById :: ByteString -> Radio
+toById x = ById . RadioId $ "/" <> x
 
 deleteStreamHandler::Web ()
 deleteStreamHandler = do
@@ -164,9 +203,9 @@ streamMetaHandler = do
     where
     sendMeta :: ByteString -> Web ()
     sendMeta i = do
-        isInBase <- member (ById (RadioId $ "/" <> i))
+        isInBase <- member (toById i)
         unless isInBase $ errorWWW 403
-        meta' <- getD (ById (RadioId $ "/" <> i)) :: Web (Maybe Meta)
+        meta' <- getD (toById i) :: Web (Maybe Meta)
         (writeLBS . encode) meta'
 
 streamStatsHandler :: Web ()
@@ -176,9 +215,9 @@ streamStatsHandler = do
     where
     sendStatus :: ByteString -> Web ()
     sendStatus i = do
-        isInBase <- member (ById (RadioId $ "/" <> i))
+        isInBase <- member (toById i)
         unless isInBase $ errorWWW 403
-        st <- getD (ById (RadioId $ "/" <> i)):: Web Status
+        st <- getD (toById i):: Web Status
         (writeLBS . encode) st
 
 
