@@ -1,4 +1,4 @@
-Siberia shoutcast server
+Siberia Shoutcast Server
 =======================
 
 Проект в процессе разработки.
@@ -24,6 +24,8 @@ Siberia shoutcast server
 > cabal configure
 > cabal build
 > cabal install
+
+Для работы требует ffmpeg. (http://www.ffmpeg.org/)
 
 Для запуска 
 > ~/.cabal/bin/radio
