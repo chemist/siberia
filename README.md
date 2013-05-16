@@ -20,10 +20,13 @@ Siberia Shoutcast Server
 --------------
 
 > git clone http://github.com/chemist/radio
+
 > cd radio
 
 > cabal configure
+
 > cabal build
+
 > cabal install
 
 Для работы требует ffmpeg. (http://www.ffmpeg.org/)
