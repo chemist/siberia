@@ -1,0 +1,5 @@
+#!/bin/bash
+
+export radio_datadir=./
+export PATH=~/.cabal/bin
+radio
