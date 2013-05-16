@@ -1,8 +1,8 @@
+{-# LANGUAGE BangPatterns           #-}
 {-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE TypeSynonymInstances   #-}
-{-# LANGUAGE BangPatterns   #-}
 module Radio.Internal (
   module Radio.Data
   , makeChannel
@@ -13,10 +13,11 @@ module Radio.Internal (
   , connectWithAddMetaAndBuffering
   ) where
 
-import           BasicPrelude
+import           BasicPrelude                             hiding (FilePath,
+                                                           appendFile)
 import           Control.Concurrent                       hiding (yield)
 import qualified Data.Map                                 as Map
-import           Prelude                                  ()
+import           Prelude                                  (FilePath)
 import qualified Prelude
 
 import           Data.Attoparsec                          (parseOnly)
@@ -44,12 +45,14 @@ import qualified Data.Collections                         as Collections
 import           Data.Cycle
 import           Data.IORef
 import           Data.Text.Encoding                       as E
+import           Data.Text.IO                             (appendFile)
 import           Debug.Trace
 import           Radio.Data
 import           System.IO                                (Handle, IOMode (..),
                                                            hClose,
                                                            openBinaryFile)
 import qualified System.Process                           as P
+import Paths_radio
 
 say x = tell . Logger $ x ++ "\n"
 
@@ -86,7 +89,8 @@ makeChannel radio = do
           stateS <- get
           let saveMeta :: Maybe Meta -> IO ()
               saveMeta x = do (_, _, Logger w) <- runRWST (setD radio x) stateR stateS
-                              appendFile logFile w
+                              dataDir <- getDataDir
+                              appendFile (dataDir <> logFile) w
           chan <- liftIO $ newChan
           buf' <- liftIO $ new 60 :: Application (Buffer ByteString)
           setD radio (Just buf')
@@ -272,7 +276,8 @@ getStream radio = do
                        newPlayList = goRight playList'
                        RadioId channelDir = rid radio
                    setD radio newPlayList
-                   return $ musicDirectory ++ (tail $ C.unpack channelDir) ++ "/" ++ file
+                   dataDir <- liftIO $ getDataDir
+                   return $ dataDir <> musicDirectory <> (tail $ C.unpack channelDir) <> "/" <> file
                f:: State -> RadioStore -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
                f state reader channelIO = do
                    maybeCh <- readIORef channelIO
@@ -320,15 +325,15 @@ runFFmpeg ::String ->  IO (S.InputStream BS.ByteString)
 runFFmpeg filename = do
     (i, o, e, ph ) <- S.runInteractiveCommand command
     forkIO $ do nullOutput <- S.nullOutput
-                S.withFileAsInput filename (fun i) 
+                S.withFileAsInput filename (fun i)
                 S.connect e nullOutput
                 exitCode <- P.waitForProcess ph
-                print exitCode 
+                print exitCode
                 print "next song"
     return o
     where fun :: S.OutputStream BS.ByteString -> S.InputStream BS.ByteString -> IO ()
           fun os is = S.connect is os
-    
+
 
 
 
@@ -442,7 +447,7 @@ instance Allowed m => Detalization m Playlist where
     setD radio a = do
         Just playlistMVar <- playlist radio
         liftIO $ modifyMVar_ playlistMVar $ \_ -> return a
-        
+
 instance Allowed m => Detalization m Song where
     getD radio = do
         Just playlistMVar <- playlist radio
@@ -454,7 +459,7 @@ instance Allowed m => Detalization m Song where
         Just playlistMVar <- playlist radio
         m <- getD radio
         liftIO $ modifyMVar_ playlistMVar $ \pl -> do
-            return $ Collections.insert (Song (1 + sidi m) song) pl 
-   
+            return $ Collections.insert (Song (1 + sidi m) song) pl
+
 
 

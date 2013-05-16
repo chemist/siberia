@@ -4,7 +4,8 @@
 
 module Main where
 
-import           BasicPrelude                 hiding (concat, length, splitAt)
+import           BasicPrelude                 hiding (FilePath, appendFile,
+                                               concat, length, splitAt)
 import qualified Prelude
 
 import           Control.Concurrent           (forkIO, myThreadId, newMVar,
@@ -31,17 +32,15 @@ import           Data.Attoparsec.RFC2616      (Request (..), request)
 
 import           Control.Monad.RWS.Lazy       hiding (getAll, listen)
 import qualified Data.Collections             as Collections
+import           Data.Text.IO                 (appendFile)
+import           Paths_radio
 import           Radio.Internal
 import           Radio.Web                    (web)
 import           Snap.Http.Server             (quickHttpServe)
+import           System.Directory
 
 
--- import qualified  Control.Distributed.Process as P
--- import qualified  Control.Distributed.Process.Node as P
--- import qualified  Control.Distributed.Process.Backend.SimpleLocalnet as P
---
-
-musicFolder = "./music/"
+musicFolder = "/music/"
 
 emptyStateS = return $ Map.empty
 
@@ -56,13 +55,15 @@ emptyStateR = do
 
 main::IO ()
 main = do
+    dataDir <- getDataDir
 --     mainId <- myThreadId
+    createDirectoryIfMissing True $ dataDir <> "/log"
     stateR <- emptyStateR
     stateS <- emptyStateS
     -- | start web application
     void . forkIO $ quickHttpServe $ void $ runWeb web stateR stateS
-    Right (_, _, Logger w) <- try $ runRWST (load "radiobase") stateR stateS :: IO (Either SomeException ((),State, Logger))
-    appendFile logFile w
+    Right (_, _, Logger w) <- try $ runRWST (load $ dataDir <> "/radiobase") stateR stateS :: IO (Either SomeException ((),State, Logger))
+    appendFile (dataDir <> logFile) w
     -- | open socket
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1
@@ -73,7 +74,7 @@ main = do
         (accepted, _) <- accept sock
         connected <- socketToStreams accepted
         forkIO $ do (_, _, Logger w) <- runRWST (connectHandler connected  `finally`  (liftIO $ sClose accepted)) stateR stateS
-                    appendFile logFile w
+                    appendFile (dataDir <> logFile) w
     sClose sock
     return ()
 

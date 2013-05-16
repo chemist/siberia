@@ -6,7 +6,7 @@ import           Control.Monad
 import           Control.Monad.RWS.Lazy (liftIO, tell)
 import           Data.Aeson
 import           Data.ByteString        (ByteString)
-import           Data.ByteString.Char8  (unpack, pack)
+import           Data.ByteString.Char8  (pack, unpack)
 import           Data.Monoid            ((<>))
 import           Snap.Core              (Method (..), Snap, dir, emptyResponse,
                                          finishWith, getParam, ifTop, method,
@@ -16,19 +16,20 @@ import           Snap.Core              (Method (..), Snap, dir, emptyResponse,
 import           Snap.Http.Server       (quickHttpServe)
 import           Snap.Util.FileServe    (serveDirectory, serveFile)
 
+import qualified Data.Collections       as Collections
 import           Data.Cycle
-import qualified Data.Collections as Collections
+import           Data.List              (reverse, sort)
+import           Data.Maybe             (fromJust, isJust)
+import qualified Data.Text              as T
 import           Debug.Trace
 import           Radio.Internal
 import           Snap.Util.FileUploads
 import           System.Directory
-import qualified Data.Text as T
-import Data.Maybe (isJust, fromJust)
-import Data.List (sort, reverse)
+import Paths_radio
 
 
 web :: Web ()
-web =  ifTop (serveFile "static/index.html")
+web =  (liftIO $ getDataDir) >>= \dataDir -> ifTop (serveFile $ dataDir <> "/static/index.html")
        <|> method GET ( route [ ("server/stats", statsHandler )
                               , ("stream", getStreamHandler )
                               , ("stream/:sid", streamHandlerById )
@@ -41,10 +42,10 @@ web =  ifTop (serveFile "static/index.html")
                                , ("playlist/:sid", changePlaylist)
                                , ("song/:sid"  , postSongAdd)
                                ] )
-       <|> method DELETE ( route [ ("stream/:sid", deleteStreamHandler ) 
+       <|> method DELETE ( route [ ("stream/:sid", deleteStreamHandler )
                                  , ("song/:sid/:fid" , deleteSong)
                                  ] )
-       <|> dir "static" (serveDirectory "./static")
+       <|> dir "static" (serveDirectory (dataDir <> "/static"))
 
 statsHandler = writeText "stats"
 
@@ -68,7 +69,7 @@ postStreamHandler = do
                     else errorWWW 400
 
 -- | get playlist
--- curl http://localhost:8000/playlist/local                                                 
+-- curl http://localhost:8000/playlist/local
 -- [{"file":"music4.mp3","position":4},{"file":"music3.mp3","position":3},{"file":"music2.mp3","position":2}]
 getPlaylist :: Web ()
 getPlaylist = do
@@ -92,27 +93,30 @@ postSongAdd :: Web ()
 postSongAdd = do
     sid <- getParam "sid"
     maybe (errorWWW 400) makePath sid
-    liftIO $ createDirectoryIfMissing True tempDir
+    dataDir <- liftIO $ getDataDir
+    liftIO $ createDirectoryIfMissing True $ dataDir <> tempDir
     let Just channelFolder = unpack <$> sid
-    handleFileUploads tempDir uploadPolicy perPartUploadPolicy $ handlerUploads channelFolder
+    handleFileUploads (dataDir <> tempDir) uploadPolicy perPartUploadPolicy $ handlerUploads channelFolder
     errorWWW 200
     where
       makePath :: ByteString -> Web ()
       makePath i = do
           isInBase <- member (toById i)
           unless isInBase $ errorWWW 403
-          liftIO $ createDirectoryIfMissing True $ musicDirectory <> unpack i
+          dataDir <- liftIO $ getDataDir
+          liftIO $ createDirectoryIfMissing True $ dataDir <> musicDirectory <> unpack i
       perPartUploadPolicy :: PartInfo -> PartUploadPolicy
       perPartUploadPolicy part = allowWithMaximumSize limitSizeForUpload
       handlerUploads :: String -> [(PartInfo, Either PolicyViolationException FilePath)] -> Web ()
       handlerUploads channelFolder x = do
           mapM_ fun x
           where fun :: (PartInfo, Either PolicyViolationException FilePath) -> Web ()
-                fun (p, Left e) = say . T.pack $ "\nerror when upload file \n\t" ++ show p ++ "\t" ++ show e 
+                fun (p, Left e) = say . T.pack $ "\nerror when upload file \n\t" ++ show p ++ "\t" ++ show e
                 fun (p, Right path) = do
                     let Just filename = unpack <$> partFileName p
                     say . T.pack $ "\nupload file " ++ filename
-                    liftIO $ renameFile path $ musicDirectory <> channelFolder <> "/" <> filename
+                    dataDir <- liftIO $ getDataDir
+                    liftIO $ renameFile path $ dataDir <> musicDirectory <> channelFolder <> "/" <> filename
                     setD (toById (pack channelFolder)) $ Song (-1) filename
 
 -- | delete song from playlist
@@ -131,13 +135,13 @@ deleteSong = do
                   [(n', _)] -> rmSong (Song n' "") i
                   _ -> errorWWW 400
          _ -> errorWWW 400
-    where 
+    where
       rmSong :: Song -> ByteString -> Web ()
       rmSong song i = do
           list <- getD (toById i) :: Web Playlist
           setD (toById i) $ removeSongFromPlaylist song list
           errorWWW 200
-          
+
 -- | mv song in playlist
 -- curl http://localhost:8000/playlist/local -d '{"file":"music1.mp3","position":0}'
 -- return new playlist
@@ -155,22 +159,22 @@ changePlaylist = do
           list <- getD (toById i) :: Web Playlist
           setD (toById i) $ moveSongInPlaylist song list
           writeLBS . encode $ moveSongInPlaylist song list
-          
-    
-          
+
+
+
 
 removeSongFromPlaylist :: Song -> Playlist -> Playlist
 removeSongFromPlaylist s p = let list = Collections.filter (\(Song x _) -> x /= sidi s) p
                                  sortedPair = zip (sort $ Collections.toList list) [0 .. ]
                              in Collections.fromAscList $ map (\(Song _ x, y) -> Song y x) sortedPair
-                             
+
 
 moveSongInPlaylist :: Song -> Playlist -> Playlist
 moveSongInPlaylist s@(Song position filename) p = let list = sort $ Collections.toList $ Collections.filter (\(Song _ f) -> f /= filename) p
                                                       h = take position list
                                                       t = drop position list
                                                   in Collections.fromAscList $ map (\(Song _ x, y) -> Song y x) $ zip (h ++ [s] ++ t) [0 .. ]
-                                                    
+
 toById :: ByteString -> Radio
 toById x = ById . RadioId $ "/" <> x
 

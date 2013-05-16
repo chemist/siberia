@@ -7,8 +7,9 @@
 
 module Radio.Data where
 
-import           BasicPrelude                 hiding (concat, mapM)
-import           Prelude                      ()
+import           BasicPrelude                 hiding (FilePath, appendFile,
+                                               concat, mapM)
+import           Prelude                      (FilePath)
 import qualified Prelude
 
 import           Control.Concurrent           (Chan, MVar, ThreadId, newMVar)
@@ -19,6 +20,7 @@ import           Data.ByteString              (concat)
 import qualified Data.ByteString              as BS
 import           Data.ByteString.Char8        (pack)
 import qualified Data.Map                     as Map
+import           Data.Text.IO                 (appendFile)
 import           Network.Socket               (HostName)
 
 import           Blaze.ByteString.Builder     (Builder)
@@ -33,9 +35,12 @@ import           Snap.Core                    (Snap)
 import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
+import Paths_radio
 
-tempDir = "./.music/"
-musicDirectory = "./music/"
+tempDir, musicDirectory, logFile :: FilePath
+tempDir = "/.music/"
+musicDirectory = "/music/"
+logFile = "/log/siberia.log"
 
 limitSizeForUpload :: Int64
 limitSizeForUpload = 10000000
@@ -63,7 +68,6 @@ data Status = Status { connections          :: Int
 defStatus :: Status
 defStatus = Status 0 Nothing Nothing Nothing []
 
-logFile = "log/siberia.log"
 
 data RadioInfo x = RI { rid      :: x
                       , url      :: Url
@@ -127,7 +131,8 @@ class Monoid a => RadioBuffer m a where
 
 runWeb :: Web a -> RadioStore -> State -> Snap a
 runWeb mw r s = do (a, _, Logger w) <- runRWST mw r s
-                   liftIO $ appendFile logFile w
+                   dataDir <- liftIO $ getDataDir
+                   liftIO $ appendFile (dataDir <> logFile) w
                    return a
 
 
@@ -179,16 +184,16 @@ instance FromJSON Radio where
 instance ToJSON (Maybe Meta) where
     toJSON (Just (Meta (bs,_))) = object [ "meta" .=  (toJSON $ BS.takeWhile (/= toEnum 0) bs) ]
     toJSON Nothing = object [ "meta" .=  toJSON BS.empty ]
-    
+
 
 instance ToJSON Song where
     toJSON x = object [ "position" .= (toJSON . sidi) x
                       , "file"     .= (toJSON . spath) x
                       ]
-                      
+
 instance FromJSON Song where
     parseJSON (Object x) = Song <$> x .: "position" <*> x .: "file"
-    
+
 
 instance ToJSON Playlist where
     toJSON x = toJSON . Collections.toList $ x

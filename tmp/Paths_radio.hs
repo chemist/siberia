@@ -6,4 +6,4 @@ getDataFileName ::FilePath -> IO FilePath
 getDataFileName = return 
 
 getDataDir::IO FilePath
-getDataDir = return "./"
+getDataDir = return "../"
