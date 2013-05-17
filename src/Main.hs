@@ -62,8 +62,7 @@ main = do
     stateS <- emptyStateS
     -- | start web application
     void . forkIO $ quickHttpServe $ void $ runWeb web stateR stateS
-    Right (_, _, Logger w) <- try $ runRWST (load $ dataDir <> "/radiobase") stateR stateS :: IO (Either SomeException ((),State, Logger))
-    appendFile (dataDir <> logFile) w
+    try $ runRWST (load $ dataDir <> "/radiobase") stateR stateS :: IO (Either SomeException ((),State, Logger))
     -- | open socket
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1

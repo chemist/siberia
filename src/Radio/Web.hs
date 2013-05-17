@@ -19,7 +19,7 @@ import           Snap.Util.FileServe    (serveDirectory, serveFile)
 import qualified Data.Collections       as Collections
 import           Data.Cycle
 import           Data.List              (reverse, sort)
-import           Data.Maybe             (fromJust, isJust)
+import           Data.Maybe             (fromJust, isJust, isNothing)
 import qualified Data.Text              as T
 import           Debug.Trace
 import           Radio.Internal
@@ -80,8 +80,8 @@ getPlaylist = do
       listSong i = do
           isInBase <- member (toById i)
           unless isInBase $ errorWWW 403
-          list <- getD (toById i) :: Web Playlist
-          writeLBS . encode $ list
+          list <- getD (toById i) :: Web (Maybe Playlist)
+          maybe (errorWWW 412) (writeLBS . encode) list
 
 
 uploadPolicy :: UploadPolicy
@@ -107,6 +107,7 @@ postSongAdd = do
           liftIO $ createDirectoryIfMissing True $ dataDir <> musicDirectory <> unpack i
       perPartUploadPolicy :: PartInfo -> PartUploadPolicy
       perPartUploadPolicy part = allowWithMaximumSize limitSizeForUpload
+      
       handlerUploads :: String -> [(PartInfo, Either PolicyViolationException FilePath)] -> Web ()
       handlerUploads channelFolder x = do
           mapM_ fun x
@@ -117,7 +118,12 @@ postSongAdd = do
                     say . T.pack $ "\nupload file " ++ filename
                     dataDir <- liftIO $ getDataDir
                     liftIO $ renameFile path $ dataDir <> musicDirectory <> channelFolder <> "/" <> filename
-                    setD (toById (pack channelFolder)) $ Song (-1) filename
+                    pl <- getD (toById (pack channelFolder)) :: Web (Maybe Playlist)
+                    case pl :: Maybe Playlist of
+                         Nothing -> setD (toById (pack channelFolder)) $ Just $ (Collections.singleton $ Song 0 filename :: Playlist)
+                         Just pl' -> do
+                             let Song n _ = Collections.maximum pl' 
+                             setD (toById (pack channelFolder)) $ Just $ Collections.insert (Song (n + 1) filename) pl' 
 
 -- | delete song from playlist
 -- dont remove file from filesystem
@@ -138,8 +144,11 @@ deleteSong = do
     where
       rmSong :: Song -> ByteString -> Web ()
       rmSong song i = do
-          list <- getD (toById i) :: Web Playlist
-          setD (toById i) $ removeSongFromPlaylist song list
+          list <- getD (toById i) :: Web (Maybe Playlist)
+          let isLast = 1 > (Collections.size $ removeSongFromPlaylist song <$> list)
+          case isLast of
+               False -> setD (toById i) $ removeSongFromPlaylist song <$> list
+               True  -> setD (toById i) (Nothing :: Maybe Playlist)
           errorWWW 200
 
 -- | mv song in playlist
@@ -156,9 +165,10 @@ changePlaylist = do
       mv song i = do
           isInBase <- member (toById i)
           unless isInBase $ errorWWW 403
-          list <- getD (toById i) :: Web Playlist
-          setD (toById i) $ moveSongInPlaylist song list
-          writeLBS . encode $ moveSongInPlaylist song list
+          list <- getD (toById i) :: Web (Maybe Playlist)
+          when (isNothing list) $ errorWWW 403
+          setD (toById i) $ moveSongInPlaylist song <$> list
+          writeLBS . encode $ moveSongInPlaylist song <$> list
 
 
 

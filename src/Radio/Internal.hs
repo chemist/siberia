@@ -207,8 +207,11 @@ bufferToOutput buf' = makeOutputStream f
 {-# INLINE bufferToOutput #-}
 
 getStream :: Radio -> Application (InputStream ByteString)
+getStream radio = getStream' =<< (getD radio :: Application (RadioInfo RadioId))
+
+getStream' :: Radio -> Application (InputStream ByteString)
 -- * тестовый поток
-getStream (ById (RadioId "/test")) = liftIO $ S.fromGenerator $ genStream fakeRadioStream'
+getStream' (ById (RadioId "/test")) = liftIO $ S.fromGenerator $ genStream fakeRadioStream'
   where
     fakeRadioStream' :: [ByteString]
     fakeRadioStream' = BasicPrelude.map (\x -> (E.encodeUtf8 . show) x <> " ") [1.. ]
@@ -220,101 +223,84 @@ getStream (ById (RadioId "/test")) = liftIO $ S.fromGenerator $ genStream fakeRa
         liftIO $ threadDelay 100000
         genStream stop
 
--- * остальное
-getStream radio = do
-    playlist' <- playlist radio
-    case playlist' of
-         Just _ -> openLocalStream radio
-         Nothing -> do
-             (i, o) <- openConnection radio
-             Url u <- getD radio
-             let Right path = parseOnly parsePath u
-                 req = "GET " <> path <> " HTTP/1.0\r\nicy-metadata: 1\r\n\r\n"
-             say "url from radio"
-             say $ show u
-             say "request to server"
-             say $ show req
-             getStream <- liftIO $ S.fromByteString req
-             liftIO $ S.connect getStream o
-             (response', headers') <- liftIO $ S.parseFromStream response i
-             -- | @TODO обработать исключения
-             setD radio headers'
-             say $ show response'
-             say $ show headers'
-             say "makeConnect end"
-             return i
-       where
-         -- | открываем соединение до стрим сервера
-         openConnection :: Radio -> Application (InputStream ByteString, OutputStream ByteString)
-         openConnection radio = do
-             Url url' <- getD radio
-             let Right (hb, pb) = parseOnly parseUrl url'
-                 h = C.unpack hb
-                 p = C.unpack pb
-             say $ show h
-             say $ show p
-             is <- liftIO $ getAddrInfo (Just hints) (Just h) (Just p)
-             let addr = head is
-             let a = addrAddress addr
-             s <- liftIO $  socket (addrFamily addr) Stream defaultProtocol
-             liftIO $ Network.Socket.connect s a
-             (i,o) <- liftIO $ S.socketToStreams s
-             return (i, o)
-             where
-                hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
+-- * proxy поток
+getStream' radio@Proxy{} = do
+    (i, o) <- openConnection radio
+    let Url url' = url radio
+    let Right path = parseOnly parsePath url'
+        req = "GET " <> path <> " HTTP/1.0\r\nicy-metadata: 1\r\n\r\n"
+    say "url from radio"
+    say $ show url'
+    say "request to server"
+    say $ show req
+    getStream <- liftIO $ S.fromByteString req
+    liftIO $ S.connect getStream o
+    (response', headers') <- liftIO $ S.parseFromStream response i
+    -- | @TODO обработать исключения
+    setD radio headers'
+    say $ show response'
+    say $ show headers'
+    say "makeConnect end"
+    return i
+    where
+      -- | открываем соединение до стрим сервера
+      openConnection :: Radio -> Application (InputStream ByteString, OutputStream ByteString)
+      openConnection radio = do
+          let Url url' = url radio
+          let Right (hb, pb) = parseOnly parseUrl url'
+              h = C.unpack hb
+              p = C.unpack pb
+          say $ show h
+          say $ show p
+          is <- liftIO $ getAddrInfo (Just hints) (Just h) (Just p)
+          let addr = head is
+          let a = addrAddress addr
+          s <- liftIO $  socket (addrFamily addr) Stream defaultProtocol
+          liftIO $ Network.Socket.connect s a
+          (i,o) <- liftIO $ S.socketToStreams s
+          return (i, o)
+          where
+             hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
 
-         openLocalStream :: Radio -> Application (InputStream ByteString)
-         openLocalStream radio = do
-             state <- get
-             reader <- ask
-             handleIO <- liftIO $ newIORef Nothing
-             liftIO $ makeInputStream $ f state reader handleIO
-             where
-               getNextSong = do
-                   playList' <- getD radio :: Application Playlist
-                   let Song _ file = getValue playList'
-                       newPlayList = goRight playList'
-                       RadioId channelDir = rid radio
-                   setD radio newPlayList
-                   dataDir <- liftIO $ getDataDir
-                   return $ dataDir <> musicDirectory <> (tail $ C.unpack channelDir) <> "/" <> file
-               f:: State -> RadioStore -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
-               f state reader channelIO = do
-                   maybeCh <- readIORef channelIO
-                   case maybeCh of
+-- * поток с локальных файлов
+getStream' radio@Local{} = do
+    state <- get
+    reader <- ask
+    handleIO <- liftIO $ newIORef Nothing
+    liftIO $ makeInputStream $ f state reader handleIO
+    where
+      getNextSong :: Application (Maybe FilePath)
+      getNextSong = do
+          playList' <- getD radio :: Application (Maybe Playlist)
+          let sfile = spath . getValue <$> playList'
+              newPlayList = goRight <$> playList'
+              RadioId channelDir = rid radio
+          setD radio newPlayList
+          dataDir <- liftIO $ getDataDir
+          return $ (<$>) concat $ sequence [pure dataDir, pure musicDirectory, pure (tail $ C.unpack channelDir), pure "/", sfile]
+      f:: State -> RadioStore -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
+      f state reader channelIO = do
+          maybeCh <- readIORef channelIO
+          case maybeCh of
+               Nothing -> do
+                   (file, _) <- evalRWST getNextSong reader state
+                   case file of
                         Nothing -> do
-                            (file, _) <- evalRWST getNextSong reader state
-                            print "Nothing"
+                            print "empty playlist"
+                            return Nothing
+                        Just file' -> do
                             print file
-                            channel <- runFFmpeg file
+                            channel <- runFFmpeg file'
                             writeIORef channelIO $ Just channel
                             f state reader channelIO
-                        Just ch -> do
-                            !chunk <- S.read ch
-                            case chunk of
-                                 Just c -> return $! Just c
-                                 Nothing -> do
-                                     writeIORef channelIO Nothing
-                                     f state reader channelIO
-               {-
-               f state reader handleIO = do
-                   maybeHandle <- readIORef handleIO
-                   case maybeHandle of
+               Just ch -> do
+                   !chunk <- S.read ch
+                   case chunk of
+                        Just c -> return $! Just c
                         Nothing -> do
-                            (file, _) <- evalRWST getNextSong reader state
-                            handler <- openBinaryFile file ReadMode
-                            writeIORef handleIO $ Just handler
-                            f state reader handleIO
-                        Just h -> do
-                            bs <- BS.hGetSome h bUFSIZ
-                            threadDelay 10000
-                            if (BS.null bs)
-                               then do
-                                   writeIORef handleIO $ Nothing
-                                   f state reader handleIO
-                               else return $! Just bs
-                -}
-
+                            writeIORef channelIO Nothing
+                            f state reader channelIO
+                                     
 bUFSIZ = 32752
 
 command :: String
@@ -397,12 +383,7 @@ instance Allowed m => Storable m Radio where
         (Store x _ _) <- ask
         liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (rid a) y
     -- | @TODO catch exception
-    --
-    playlist a = do
-        (Store _ _ x) <- ask
-        liftIO $ withMVar x $ \y -> return $ Map.lookup (rid a) y
-
-
+    
 
 
 addHostPort::HostPort -> Radio -> Radio
@@ -414,6 +395,12 @@ getter x =  flip  withMVar (return . x)
 
 setter :: (Radio -> Radio) -> MVar Radio -> IO ()
 setter x  =  flip modifyMVar_ (return . x)
+
+instance Allowed m => Detalization m (RadioInfo RadioId) where
+    getD radio = do
+        i <- info radio 
+        liftIO $ withMVar i $ \x -> return x
+    setD = undefined
 
 instance Allowed m => Detalization m Url where
     getD radio = info radio >>= liftIO . getter url
@@ -440,26 +427,16 @@ instance Allowed m => Detalization m (Maybe (Buffer ByteString)) where
     getD radio = info radio >>= liftIO . getter buff
     setD radio a = info radio >>= liftIO . setter (\y -> y { buff = a})
 
-instance Allowed m => Detalization m Playlist where
+instance Allowed m => Detalization m (Maybe Playlist) where
     getD radio = do
-        Just playlistMVar <- playlist radio
-        liftIO $ withMVar playlistMVar (return . id)
+        i <- info radio 
+        liftIO $ withMVar i fun 
+        where 
+          fun x@Local{} = return $ playlist x
+          fun _ = return Nothing
     setD radio a = do
-        Just playlistMVar <- playlist radio
-        liftIO $ modifyMVar_ playlistMVar $ \_ -> return a
-
-instance Allowed m => Detalization m Song where
-    getD radio = do
-        Just playlistMVar <- playlist radio
-        liftIO $ withMVar playlistMVar $ \x -> do
-            case Collections.size x of
-                 0 -> return $ Song (-1) ""
-                 _ ->  return $ Collections.maximum x
-    setD radio (Song _ song) = do
-        Just playlistMVar <- playlist radio
-        m <- getD radio
-        liftIO $ modifyMVar_ playlistMVar $ \pl -> do
-            return $ Collections.insert (Song (1 + sidi m) song) pl
+        i <- info radio 
+        liftIO $ void (try $ setter (\y -> y { playlist = a}) i :: IO (Either SomeException ()))
 
 
 

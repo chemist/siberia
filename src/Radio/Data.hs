@@ -56,8 +56,6 @@ type Channel = Maybe (Chan (Maybe ByteString))
 port :: Int
 port = 2000
 
-data RadioType = LocalFiles | Proxy | Id
-
 data Status = Status { connections          :: Int
                      , connectProcess       :: Maybe ThreadId
                      , bufferProcess        :: Maybe ThreadId
@@ -69,16 +67,28 @@ defStatus :: Status
 defStatus = Status 0 Nothing Nothing Nothing []
 
 
-data RadioInfo x = RI { rid      :: x
-                      , url      :: Url
-                      , pid      :: Status
-                      , headers  :: Headers
-                      , meta     :: Maybe Meta
-                      , channel  :: Channel
-                      , hostPort :: HostPort
-                      , buff     :: Maybe (Buffer ByteString)
-                      }
-                  | ById { rid :: x } deriving (Eq)
+data RadioInfo x = Proxy 
+  { rid      :: x
+  , url      :: Url
+  , pid      :: Status
+  , headers  :: Headers
+  , meta     :: Maybe Meta
+  , channel  :: Channel
+  , hostPort :: HostPort
+  , buff     :: Maybe (Buffer ByteString)
+  }
+                 | Local
+  { rid :: x
+  , pid :: Status
+  , headers :: Headers
+  , meta :: Maybe Meta
+  , channel :: Channel
+  , hostPort :: HostPort
+  , buff :: Maybe (Buffer ByteString)
+  , playlist :: Maybe Playlist
+  }
+                 | ById 
+  { rid :: x } deriving (Eq)
 
 data Song = Song { sidi  :: Int
                  , spath :: String
@@ -152,8 +162,6 @@ class Storable m a where
     list   :: m [a]
     -- ** возвращает MVar с RadioInfo по ById RadioId
     info   :: a -> m (MVar a)
-    -- ** возвращает MVar Playlist если определенн
-    playlist :: a -> m (Maybe (MVar Playlist))
 
 class Detalization m a where
     getD :: Radio -> m a
@@ -163,23 +171,43 @@ instance Show Radio where
     show (ById x) = Prelude.show x
     show x = Prelude.show (rid x) ++ Prelude.show (url x) ++ Prelude.show (hostPort x)
 
+
+tproxy, tlocal :: Text
+tproxy = "proxy"
+tlocal = "local"
+
 instance ToJSON Radio where
-    toJSON x = object [ "id" .= (toJSON . rid) x
-                      , "url" .= (toJSON . url) x
-                      , "listenUrl" .= (toJSON . concat) ["http://", pack host', ":", toBs port', "/", (fromRid . rid) x]
-                      ]
-               where
-                 (Just (host', port')) = hostPort x
-                 toBs::Int -> ByteString
-                 toBs  = pack . Prelude.show
-                 fromRid :: RadioId -> ByteString
-                 fromRid (RadioId y ) = y
+    toJSON x@Proxy{} = object [ "id" .= (toJSON . rid) x
+                              , "url" .= (toJSON . url) x
+                              , "listenUrl" .= (toJSON . concat) ["http://", pack host', ":", toBs port', "/", (fromRid . rid) x]
+                              , "type" .= toJSON tproxy
+                              ]
+                       where
+                         (Just (host', port')) = hostPort x
+                         toBs::Int -> ByteString
+                         toBs  = pack . Prelude.show
+                         fromRid :: RadioId -> ByteString
+                         fromRid (RadioId y ) = y
+    toJSON x@Local{} = object
+      [ "id" .= (toJSON . rid) x
+      , "playlist" .= (toJSON . playlist) x
+      , "listenUrl" .= (toJSON . concat) ["http://", pack host', ":", toBs port', "/", (fromRid . rid) x]
+      , "type" .= toJSON tlocal
+      ]
+                       where
+                         (Just (host', port')) = hostPort x
+                         toBs::Int -> ByteString
+                         toBs  = pack . Prelude.show
+                         fromRid :: RadioId -> ByteString
+                         fromRid (RadioId y ) = y
 
 instance FromJSON Radio where
-    parseJSON (Object x) = do
-        rid' <- x .: "id"
-        url' <- x .: "url"
-        return $ RI (addSlash $ RadioId rid') (Url url') defStatus [] Nothing Nothing Nothing Nothing
+    parseJSON (Object x) =  Proxy <$> toRid (x .: "id") <*> (Url <$> x .: "url") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN 
+                        <|> Local <$> toRid (x .: "id") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> pN
+        where toRid x = addSlash . RadioId <$> x
+              pN = pure Nothing
+              pD = pure defStatus
+              pL = pure []
 
 instance ToJSON (Maybe Meta) where
     toJSON (Just (Meta (bs,_))) = object [ "meta" .=  (toJSON $ BS.takeWhile (/= toEnum 0) bs) ]
@@ -224,14 +252,32 @@ instance Binary Url where
 instance Binary RadioId where
     put (RadioId x) = B.put x
     get = RadioId <$> B.get
+    
+instance Binary Song where
+    put (Song x y) = B.put x >> B.put y
+    get = Song <$> B.get <*> B.get
+    
+instance Binary Playlist where
+    put  = B.put . Collections.toList 
+    get = Collections.fromList <$> B.get
 
 instance Binary Radio where
-    put x = do
+    put x@Proxy{} = do
+        B.put (0 :: Word8)
         B.put $ rid x
         B.put $ url x
-    get = do
-        r <- B.get :: Get RadioId
-        u <- B.get :: Get Url
-        return $ RI r u defStatus [] Nothing Nothing Nothing Nothing
-
+    put x@Local{} = do
+        B.put (1 :: Word8)
+        B.put $ rid x
+        B.put $ playlist x
+    get = do t <- B.get :: Get Word8
+             case t of
+                  0 -> do
+                      r <- B.get :: Get RadioId
+                      u <- B.get :: Get Url
+                      return $ Proxy r u defStatus [] Nothing Nothing Nothing Nothing
+                  1 -> do
+                      r <- B.get
+                      p <- B.get
+                      return $ Local r defStatus [] Nothing Nothing Nothing Nothing p
 
