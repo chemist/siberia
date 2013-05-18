@@ -7,19 +7,20 @@
 
 module Radio.Data where
 
-import           BasicPrelude                 hiding (FilePath, appendFile,
+import           BasicPrelude                 hiding (FilePath, appendFile, Map,
                                                concat, mapM)
 import           Prelude                      (FilePath)
 import qualified Prelude
 
 import           Control.Concurrent           (Chan, MVar, ThreadId, newMVar)
+import Data.Map (Map)
 import           Data.Aeson                   (FromJSON (..), ToJSON (..),
                                                Value (..), object, (.:), (.=))
 import           Data.Attoparsec.RFC2616      (Header (..))
 import           Data.ByteString              (concat)
 import qualified Data.ByteString              as BS
 import           Data.ByteString.Char8        (pack)
-import qualified Data.Map                     as Map
+import qualified Data.Map.Lazy                as Map
 import           Data.Text.IO                 (appendFile)
 import           Network.Socket               (HostName)
 
@@ -30,7 +31,6 @@ import qualified Data.Binary                  as B
 import qualified Data.Collections             as Collections
 import           Data.Cycle
 import           Data.IORef
-import qualified Data.Map                     as M
 import           Snap.Core                    (Snap)
 import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
@@ -102,7 +102,7 @@ instance Ord Song where
 
 
 type Radio = RadioInfo RadioId
-type AllPlaylist = M.Map RadioId (MVar Playlist)
+type AllPlaylist = Map.Map RadioId (MVar Playlist)
 
 data Store a = Store (MVar (Map RadioId (MVar a))) HostPort (MVar AllPlaylist)
 
