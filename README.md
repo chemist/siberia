@@ -6,8 +6,8 @@ Siberia
 --------------
 
 ```
-git clone http://github.com/chemist/radio
-cd radio
+git clone http://github.com/chemist/siberia
+cd siberia
 cabal configure
 cabal build
 cabal install
@@ -17,9 +17,9 @@ cabal install
 На 8000 порту веб-интерфейс. На 2000 порту вещаются потоки.
 
 ```
-~/.cabal/bin/radio
+~/.cabal/bin/siberia
 ```
-при этом статика, логи, база радиостанций и музыка будут находиться в ~/.cabal/share/radio-0.1.0.0/
+при этом статика, логи, база радиостанций и музыка будут находиться в ~/.cabal/share/siberia-0.1.0.0/
 
 Или, легкий запуск из текущей папки
 ```
