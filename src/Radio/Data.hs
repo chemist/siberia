@@ -240,7 +240,7 @@ addSlash (RadioId x) = RadioId $ concat ["/", x]
 
 
 instance ToJSON RadioId where
-    toJSON (RadioId x) = toJSON x
+    toJSON (RadioId x) = toJSON $ BS.tail x
 
 instance ToJSON Url where
     toJSON (Url x) = toJSON x
