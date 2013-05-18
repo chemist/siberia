@@ -16,7 +16,7 @@ module Radio.Internal (
 import           BasicPrelude                             hiding (FilePath, Map, 
                                                            appendFile)
 import           Control.Concurrent                       hiding (yield)
-import qualified Data.Map.Lazy                                 as Map
+import qualified Data.Map                                as Map
 import Data.Map (Map)
 import           Prelude                                  (FilePath)
 import qualified Prelude

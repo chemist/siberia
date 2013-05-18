@@ -34,7 +34,7 @@ executable siberia
                        io-streams ==1.1.*, 
                        process ==1.1.*, 
                        basic-prelude ==0.3.*, 
-                       containers ==0.5.*, 
+                       containers ==0.4.*, 
                        network ==2.4.*, 
                        collections-api ==1.0.*, 
                        snap-server ==0.9.*, 

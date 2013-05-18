@@ -20,7 +20,7 @@ import           Data.Attoparsec.RFC2616      (Header (..))
 import           Data.ByteString              (concat)
 import qualified Data.ByteString              as BS
 import           Data.ByteString.Char8        (pack)
-import qualified Data.Map.Lazy                as Map
+import qualified Data.Map               as Map
 import           Data.Text.IO                 (appendFile)
 import           Network.Socket               (HostName)
 
