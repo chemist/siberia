@@ -40,10 +40,10 @@ web =  (liftIO $ getDataDir) >>= \dataDir -> ifTop (serveFile $ dataDir <> "/sta
                               ] )
        <|> method POST ( route [ ("stream/:sid", postStreamHandler )
                                , ("playlist/:sid", changePlaylist)
-                               , ("song/:sid"  , postSongAdd)
+                               , ("audio/:sid"  , postSongAdd)
                                ] )
        <|> method DELETE ( route [ ("stream/:sid", deleteStreamHandler )
-                                 , ("song/:sid/:fid" , deleteSong)
+                                 , ("audio/:sid/:fid" , deleteSong)
                                  ] )
        <|> dir "static" (serveDirectory (dataDir <> "/static"))
 
