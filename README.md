@@ -31,4 +31,4 @@ cabal install
 mpg123 http://localhost:2000/3600
 ```
 
-> Copyright (c) 2013 RadioVoice LLC
+> Copyright (c) 2013 RadioVoice
