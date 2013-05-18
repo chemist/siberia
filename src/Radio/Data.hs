@@ -169,7 +169,8 @@ class Detalization m a where
 
 instance Show Radio where
     show (ById x) = Prelude.show x
-    show x = Prelude.show (rid x) ++ Prelude.show (url x) ++ Prelude.show (hostPort x)
+    show x@Proxy{} = Prelude.show (rid x) ++ Prelude.show (url x) ++ Prelude.show (hostPort x)
+    show x@Local{} = Prelude.show (rid x) ++ Prelude.show (hostPort x)
 
 
 tproxy, tlocal :: Text
