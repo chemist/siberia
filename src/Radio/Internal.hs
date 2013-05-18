@@ -52,7 +52,7 @@ import           System.IO                                (Handle, IOMode (..),
                                                            hClose,
                                                            openBinaryFile)
 import qualified System.Process                           as P
-import Paths_radio
+import Paths_siberia
 
 say x = tell . Logger $ x ++ "\n"
 

@@ -33,7 +33,7 @@ import           Data.Attoparsec.RFC2616      (Request (..), request)
 import           Control.Monad.RWS.Lazy       hiding (getAll, listen)
 import qualified Data.Collections             as Collections
 import           Data.Text.IO                 (appendFile)
-import           Paths_radio
+import           Paths_siberia
 import           Radio.Internal
 import           Radio.Web                    (web)
 import           Snap.Http.Server             (quickHttpServe)

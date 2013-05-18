@@ -35,7 +35,7 @@ import           Snap.Core                    (Snap)
 import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
-import Paths_radio
+import Paths_siberia
 
 tempDir, musicDirectory, logFile :: FilePath
 tempDir = "/.music/"

@@ -25,7 +25,7 @@ import           Debug.Trace
 import           Radio.Internal
 import           Snap.Util.FileUploads
 import           System.Directory
-import Paths_radio
+import Paths_siberia
 
 
 web :: Web ()
