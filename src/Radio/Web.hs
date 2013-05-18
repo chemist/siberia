@@ -202,13 +202,13 @@ deleteStreamHandler = do
 streamHandlerById::Web ()
 streamHandlerById = do
     param <- getParam "sid"
-    maybe justGetStream withParam param
+    maybe (errorWWW 400) getStream param
     where
-      justGetStream :: Web ()
-      justGetStream = writeText "clean param"
-      withParam sid = do
-          writeBS sid
-          writeText "with param"
+      getStream i = do
+          isInBase <- member (toById i)
+          unless isInBase $ errorWWW 403
+          st <- getD (toById i) :: Web Radio
+          (writeLBS . encode) st
 
 streamMetaHandler :: Web ()
 streamMetaHandler = do
