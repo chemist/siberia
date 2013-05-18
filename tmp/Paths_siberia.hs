@@ -1,6 +1,6 @@
 -- | for developing only 
 --
-module Paths_radio where
+module Paths_siberia where
 
 getDataFileName ::FilePath -> IO FilePath
 getDataFileName = return 
