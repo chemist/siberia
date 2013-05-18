@@ -3,22 +3,20 @@ module Radio.Web where
 
 import           Control.Applicative
 import           Control.Monad
-import           Control.Monad.RWS.Lazy (liftIO, tell)
+import           Control.Monad.RWS.Lazy (liftIO)
 import           Data.Aeson
 import           Data.ByteString        (ByteString)
 import           Data.ByteString.Char8  (pack, unpack)
 import           Data.Monoid            ((<>))
-import           Snap.Core              (Method (..), Snap, dir, emptyResponse,
+import           Snap.Core              (Method (..), dir, emptyResponse,
                                          finishWith, getParam, ifTop, method,
                                          readRequestBody, route,
-                                         setResponseCode, writeBS, writeLBS,
+                                         setResponseCode, writeLBS,
                                          writeLBS, writeText)
-import           Snap.Http.Server       (quickHttpServe)
 import           Snap.Util.FileServe    (serveDirectory, serveFile)
 
 import qualified Data.Collections       as Collections
-import           Data.Cycle
-import           Data.List              (reverse, sort)
+import           Data.List              (sort)
 import           Data.Maybe             (fromJust, isJust, isNothing)
 import qualified Data.Text              as T
 import           Debug.Trace
@@ -29,7 +27,7 @@ import Paths_siberia
 
 
 web :: Web ()
-web =  (liftIO $ getDataDir) >>= \dataDir -> ifTop (serveFile $ dataDir <> "/static/index.html")
+web =  liftIO getDataDir >>= \dataDir -> ifTop (serveFile $ dataDir <> "/static/index.html")
        <|> method GET ( route [ ("server/stats", statsHandler )
                               , ("stream", getStreamHandler )
                               , ("stream/:sid", streamHandlerById )
@@ -47,6 +45,7 @@ web =  (liftIO $ getDataDir) >>= \dataDir -> ifTop (serveFile $ dataDir <> "/sta
                                  ] )
        <|> dir "static" (serveDirectory (dataDir <> "/static"))
 
+statsHandler :: Web ()
 statsHandler = writeText "stats"
 
 saveHandler::Web ()
@@ -93,7 +92,7 @@ postSongAdd :: Web ()
 postSongAdd = do
     sid <- getParam "sid"
     maybe (errorWWW 400) makePath sid
-    dataDir <- liftIO $ getDataDir
+    dataDir <- liftIO getDataDir
     liftIO $ createDirectoryIfMissing True $ dataDir <> tempDir
     let Just channelFolder = unpack <$> sid
     handleFileUploads (dataDir <> tempDir) uploadPolicy perPartUploadPolicy $ handlerUploads channelFolder
@@ -103,24 +102,23 @@ postSongAdd = do
       makePath i = do
           isInBase <- member (toById i)
           unless isInBase $ errorWWW 403
-          dataDir <- liftIO $ getDataDir
+          dataDir <- liftIO getDataDir
           liftIO $ createDirectoryIfMissing True $ dataDir <> musicDirectory <> unpack i
       perPartUploadPolicy :: PartInfo -> PartUploadPolicy
-      perPartUploadPolicy part = allowWithMaximumSize limitSizeForUpload
+      perPartUploadPolicy _ = allowWithMaximumSize limitSizeForUpload
       
       handlerUploads :: String -> [(PartInfo, Either PolicyViolationException FilePath)] -> Web ()
-      handlerUploads channelFolder x = do
-          mapM_ fun x
+      handlerUploads channelFolder = mapM_ fun 
           where fun :: (PartInfo, Either PolicyViolationException FilePath) -> Web ()
                 fun (p, Left e) = say . T.pack $ "\nerror when upload file \n\t" ++ show p ++ "\t" ++ show e
                 fun (p, Right path) = do
                     let Just filename = unpack <$> partFileName p
                     say . T.pack $ "\nupload file " ++ filename
-                    dataDir <- liftIO $ getDataDir
+                    dataDir <- liftIO getDataDir
                     liftIO $ renameFile path $ dataDir <> musicDirectory <> channelFolder <> "/" <> filename
                     pl <- getD (toById (pack channelFolder)) :: Web (Maybe Playlist)
                     case pl :: Maybe Playlist of
-                         Nothing -> setD (toById (pack channelFolder)) $ Just $ (Collections.singleton $ Song 0 filename :: Playlist)
+                         Nothing -> setD (toById (pack channelFolder)) $ Just (Collections.singleton $ Song 0 filename :: Playlist)
                          Just pl' -> do
                              let Song n _ = Collections.maximum pl' 
                              setD (toById (pack channelFolder)) $ Just $ Collections.insert (Song (n + 1) filename) pl' 
@@ -136,7 +134,7 @@ deleteSong = do
          (Just i, Just n) -> do
              isInBase <- member (toById i)
              unless isInBase $ errorWWW 403
-             case (reads $ unpack n) of
+             case reads $ unpack n of
                   [] -> errorWWW 400
                   [(n', _)] -> rmSong (Song n' "") i
                   _ -> errorWWW 400

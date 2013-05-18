@@ -31,7 +31,6 @@ import           Data.Maybe                               (fromJust)
 import           Network.Socket
 import           System.IO.Streams                        as S
 import           System.IO.Streams.Attoparsec             as S
-import           System.IO.Streams.Combinators            as S
 import           System.IO.Streams.Concurrent             as S
 
 import           Control.Monad.RWS.Lazy
@@ -40,21 +39,17 @@ import qualified Control.Monad.RWS.Lazy                   as M
 import           Blaze.ByteString.Builder                 (Builder)
 import qualified Blaze.ByteString.Builder                 as Builder
 import           Blaze.ByteString.Builder.Internal.Buffer (allNewBuffersStrategy)
-import           Control.Applicative                      hiding (empty)
 import           Data.Binary                              (decode, encode)
 import qualified Data.Collections                         as Collections
 import           Data.Cycle
 import           Data.IORef
 import           Data.Text.Encoding                       as E
 import           Data.Text.IO                             (appendFile)
-import           Debug.Trace
 import           Radio.Data
-import           System.IO                                (Handle, IOMode (..),
-                                                           hClose,
-                                                           openBinaryFile)
 import qualified System.Process                           as P
 import Paths_siberia
 
+say :: Allowed m => Text -> m ()
 say x = tell . Logger $ x ++ "\n"
 
 save :: Allowed m => Prelude.FilePath -> m ()
@@ -69,7 +64,7 @@ load path = do
     l <- liftIO $ LS.readFile path
     let radio  = decode l :: [Radio]
     say "load next radio station"
-    M.mapM_ (\x -> say $ show x) radio
+    M.mapM_ (say . show) radio
     _ <- M.mapM_ create radio
     return ()
 
@@ -83,7 +78,7 @@ makeChannel radio = do
     where
       whenError x = do
           say $ "Error when connection: " ++ show x
-          setD radio $ (Nothing :: Maybe (Chan (Maybe ByteString)))
+          setD radio (Nothing :: Maybe (Chan (Maybe ByteString)))
       whenGood radioStreamInput' = do
           say "start good"
           stateR <- ask
@@ -92,7 +87,7 @@ makeChannel radio = do
               saveMeta x = do (_, _, Logger w) <- runRWST (setD radio x) stateR stateS
                               dataDir <- getDataDir
                               appendFile (dataDir <> logFile) w
-          chan <- liftIO $ newChan
+          chan <- liftIO newChan
           buf' <- liftIO $ new 60 :: Application (Buffer ByteString)
           setD radio (Just buf')
           metaInt <- unpackMeta <$> (lookupHeader "icy-metaint" <$> getD radio) :: Application (Maybe Int)
@@ -195,7 +190,7 @@ connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
     fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16)
 
     zero :: ByteString
-    zero = BS.pack $ [toEnum 0]
+    zero = BS.pack [toEnum 0]
 
 {-# INLINE connectWithAddMetaAndBuffering #-}
 
@@ -234,8 +229,8 @@ getStream' radio@Proxy{} = do
     say $ show url'
     say "request to server"
     say $ show req
-    getStream <- liftIO $ S.fromByteString req
-    liftIO $ S.connect getStream o
+    requestStream <- liftIO $ S.fromByteString req
+    liftIO $ S.connect requestStream o
     (response', headers') <- liftIO $ S.parseFromStream response i
     -- | @TODO обработать исключения
     setD radio headers'
@@ -277,7 +272,7 @@ getStream' radio@Local{} = do
               newPlayList = goRight <$> playList'
               RadioId channelDir = rid radio
           setD radio newPlayList
-          dataDir <- liftIO $ getDataDir
+          dataDir <- liftIO getDataDir
           return $ (<$>) concat $ sequence [pure dataDir, pure musicDirectory, pure (tail $ C.unpack channelDir), pure "/", sfile]
       f:: State -> RadioStore -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
       f state reader channelIO = do
@@ -342,20 +337,20 @@ instance Monoid a => RadioBuffer Buffer a where
         modifyIORef (active y) goRight
         position <- readIORef $ active y
         buf' <- readIORef $ buf y
-        modifyIORef (nthValue (getValue position) buf') $ \_ -> x
+        modifyIORef (nthValue (getValue position) buf') $ const x
         return ()
     getAll x = do
         s <- bufSize x
         position <- readIORef $ active x
         buf' <- readIORef $ buf x
         let res = takeLR s $ goLR (1 + getValue position) buf'
-        mconcat <$> Prelude.mapM (\y -> readIORef y) res
+        mconcat <$> Prelude.mapM readIORef res
 
 instance Allowed m => Storable m Radio where
     member (ById (RadioId "/test")) = return True
     member r = do
         (Store x _ _) <- ask
-        liftIO $ withMVar x $ \y -> return $ (rid r) `Map.member` y
+        liftIO $ withMVar x $ \y -> return $ rid r `Map.member` y
     create r = do
         (Store x hp _) <- ask
         let withPort = addHostPort hp r
@@ -421,7 +416,7 @@ instance Allowed m => Detalization m Channel where
 
 instance Allowed m => Detalization m (Maybe Meta) where
     getD radio = info radio >>= liftIO . getter meta
-    setD radio (Just (Meta ("",0))) = return ()
+    setD _ (Just (Meta ("",0))) = return ()
     setD radio a = info radio >>= liftIO . setter (\y -> y { meta = a })
 
 instance Allowed m => Detalization m (Maybe (Buffer ByteString)) where

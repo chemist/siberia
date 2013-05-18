@@ -12,7 +12,7 @@ import           BasicPrelude                 hiding (FilePath, appendFile, Map,
 import           Prelude                      (FilePath)
 import qualified Prelude
 
-import           Control.Concurrent           (Chan, MVar, ThreadId, newMVar)
+import           Control.Concurrent           (Chan, MVar, ThreadId)
 import Data.Map (Map)
 import           Data.Aeson                   (FromJSON (..), ToJSON (..),
                                                Value (..), object, (.:), (.=))
@@ -24,7 +24,6 @@ import qualified Data.Map               as Map
 import           Data.Text.IO                 (appendFile)
 import           Network.Socket               (HostName)
 
-import           Blaze.ByteString.Builder     (Builder)
 import           Control.Monad.RWS.Lazy
 import           Data.Binary                  (Binary, Get)
 import qualified Data.Binary                  as B
@@ -32,9 +31,6 @@ import qualified Data.Collections             as Collections
 import           Data.Cycle
 import           Data.IORef
 import           Snap.Core                    (Snap)
-import           System.IO.Streams            as S
-import           System.IO.Streams.Attoparsec as S
-import           System.IO.Streams.Concurrent as S
 import Paths_siberia
 
 tempDir, musicDirectory, logFile :: FilePath
@@ -113,7 +109,7 @@ type RadioStore = Store Radio
 newtype Logger = Logger Text
 
 instance Monoid Logger where
-    mempty = Logger $ mempty
+    mempty = Logger mempty
     mappend (Logger x) (Logger y) = Logger $ mappend x y
 
 type Application = RWST RadioStore Logger State IO
@@ -141,7 +137,7 @@ class Monoid a => RadioBuffer m a where
 
 runWeb :: Web a -> RadioStore -> State -> Snap a
 runWeb mw r s = do (a, _, Logger w) <- runRWST mw r s
-                   dataDir <- liftIO $ getDataDir
+                   dataDir <- liftIO getDataDir
                    liftIO $ appendFile (dataDir <> logFile) w
                    return a
 
@@ -201,14 +197,16 @@ instance ToJSON Radio where
                          toBs  = pack . Prelude.show
                          fromRid :: RadioId -> ByteString
                          fromRid (RadioId y ) = y
+    toJSON _ = undefined
 
 instance FromJSON Radio where
     parseJSON (Object x) =  Proxy <$> toRid (x .: "id") <*> (Url <$> x .: "url") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN 
                         <|> Local <$> toRid (x .: "id") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> pN
-        where toRid x = addSlash . RadioId <$> x
+        where toRid y = addSlash . RadioId <$> y
               pN = pure Nothing
               pD = pure defStatus
               pL = pure []
+    parseJSON _ = mzero
 
 instance ToJSON (Maybe Meta) where
     toJSON (Just (Meta (bs,_))) = object [ "meta" .=  (toJSON $ BS.takeWhile (/= toEnum 0) bs) ]
@@ -222,6 +220,7 @@ instance ToJSON Song where
 
 instance FromJSON Song where
     parseJSON (Object x) = Song <$> x .: "position" <*> x .: "file"
+    parseJSON _ = mzero
 
 
 instance ToJSON Playlist where
@@ -271,6 +270,7 @@ instance Binary Radio where
         B.put (1 :: Word8)
         B.put $ rid x
         B.put $ playlist x
+    put _ = undefined
     get = do t <- B.get :: Get Word8
              case t of
                   0 -> do
@@ -281,4 +281,5 @@ instance Binary Radio where
                       r <- B.get
                       p <- B.get
                       return $ Local r defStatus [] Nothing Nothing Nothing Nothing p
+                  _ -> undefined
 

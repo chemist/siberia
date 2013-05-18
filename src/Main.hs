@@ -40,9 +40,11 @@ import           Snap.Http.Server             (quickHttpServe)
 import           System.Directory
 
 
+musicFolder :: String
 musicFolder = "/music/"
 
-emptyStateS = return $ Map.empty
+emptyStateS :: IO State
+emptyStateS = return Map.empty
 
 emptyStateR::IO RadioStore
 emptyStateR = do
@@ -94,7 +96,7 @@ connectHandler (iS, oS) = do
 
     whenGood (request', headers') = do
         let channel' = ById (RadioId $ requestUri request')
-        is <- member $ channel'
+        is <- member channel'
         if is
           then do
              say "make connection"
