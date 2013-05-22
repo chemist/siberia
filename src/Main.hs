@@ -111,6 +111,8 @@ makeClient oS radio = do
     when (isNothing chan) $ do
         makeChannel radio
         liftIO $ threadDelay 1000000
+    pid <- liftIO $ myThreadId
+    saveClientPid pid radio
     chan' <- getD radio :: Application Channel
     case chan' of
          Just chan'' -> do
@@ -130,6 +132,7 @@ makeClient oS radio = do
              either whenError whenGood fin
              say "make finally work"
          Nothing -> liftIO $ S.write (Just "ICY 423 Locked\r\n") oS
+    removeClientPid pid radio
     where
       whenError s = say $ "catched: " ++ show s
       whenGood _ = return ()

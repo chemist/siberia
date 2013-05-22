@@ -57,7 +57,7 @@ data Status = Status { connections          :: Int
                      , bufferProcess        :: Maybe ThreadId
                      , chanProcess          :: Maybe ThreadId
                      , connectionsProcesses :: [ThreadId]
-                     } deriving (Eq)
+                     } deriving (Eq, Show)
 
 defStatus :: Status
 defStatus = Status 0 Nothing Nothing Nothing []
@@ -101,12 +101,6 @@ type Radio = RadioInfo RadioId
 data Store a = Store (MVar (Map RadioId (MVar a))) HostPort 
 
 type RadioStore = Store Radio
-
-newtype Logger = Logger Text
-
-instance Monoid Logger where
-    mempty = Logger mempty
-    mappend (Logger x) (Logger y) = Logger $ mappend x y
 
 type Application = ReaderT RadioStore IO
 

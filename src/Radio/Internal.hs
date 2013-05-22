@@ -3,6 +3,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE TypeSynonymInstances   #-}
+{-# LANGUAGE RecordWildCards   #-}
 module Radio.Internal (
   module Radio.Data
   , makeChannel
@@ -11,6 +12,8 @@ module Radio.Internal (
   , say
   , connectWithRemoveMetaAndBuffering
   , connectWithAddMetaAndBuffering
+  , saveClientPid
+  , removeClientPid
   ) where
 
 import           BasicPrelude                             hiding (FilePath, Map, 
@@ -50,7 +53,7 @@ import qualified System.Process                           as P
 import Paths_siberia
 
 say :: Allowed m => Text -> m ()
-say x = putStrLn $ x ++ "\n"
+say x = putStrLn x 
 
 save :: Allowed m => Prelude.FilePath -> m ()
 save path = do
@@ -359,6 +362,7 @@ instance Allowed m => Storable m Radio where
                return (True, withPort)
     remove r = do
         (Store x _) <- ask
+        -- | @TODO прибить все пользовательские потоки, прибить процессы из статуса
         is <- member r
         if is
            then do
@@ -401,6 +405,41 @@ instance Allowed m => Detalization m Url where
 instance Allowed m => Detalization m Status where
     getD radio = info radio >>= liftIO . getter pid
     setD radio a = info radio >>= liftIO . setter (\y -> y { pid = a })
+    
+saveClientPid :: ThreadId -> Radio -> Application ()
+saveClientPid t radio = do
+    s@Status{..} <- getD radio :: Application Status
+    say "add client pid"
+    say $ show s
+    setD radio $ Status (connections + 1) connectProcess bufferProcess chanProcess (t:connectionsProcesses)
+    
+removeClientPid :: ThreadId -> Radio -> Application ()
+removeClientPid t radio = removeClientPid' t =<< (getD radio :: Application Radio)
+
+removeClientPid' :: ThreadId -> Radio -> Application ()
+removeClientPid' t radio@Proxy{} = do
+    s@Status{..} <- getD radio :: Application Status
+    setD radio $ Status (connections - 1) connectProcess bufferProcess chanProcess (Prelude.filter (/= t) connectionsProcesses)
+    say "remove client pid"
+    say $ show s
+    when ((connections - 1) == 0) $ do
+        say "last user go away"
+        say "kill proxy radio channel"
+        liftIO $ do
+            killThread $ fromJust connectProcess
+            killThread $ fromJust chanProcess
+            killThread $ fromJust bufferProcess
+        setD radio (Nothing :: Channel)
+        setD radio (Nothing :: Maybe (Buffer ByteString))
+removeClientPid' t radio@Local{} = do
+    s@Status{..} <- getD radio :: Application Status
+    setD radio $ Status (connections - 1) connectProcess bufferProcess chanProcess (Prelude.filter (/= t) connectionsProcesses)
+    say "remove client pid"
+    say $ show s
+    when ((connections - 1) == 0) $ do
+        say "last user go away"
+        
+           
 
 instance Allowed m => Detalization m Headers where
     getD radio = info radio >>= liftIO . getter headers
