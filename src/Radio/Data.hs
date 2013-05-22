@@ -7,31 +7,31 @@
 
 module Radio.Data where
 
-import           BasicPrelude                 hiding (FilePath, appendFile, Map,
-                                               concat, mapM)
-import           Prelude                      (FilePath)
+import           BasicPrelude            hiding (FilePath, Map, appendFile,
+                                          concat, mapM)
+import           Prelude                 (FilePath)
 import qualified Prelude
 
-import           Control.Concurrent           (Chan, MVar, ThreadId)
-import Data.Map (Map)
-import           Data.Aeson                   (FromJSON (..), ToJSON (..),
-                                               Value (..), object, (.:), (.=))
-import           Data.Attoparsec.RFC2616      (Header (..))
-import           Data.ByteString              (concat)
-import qualified Data.ByteString              as BS
-import           Data.ByteString.Char8        (pack)
-import qualified Data.Map               as Map
-import           Data.Text.IO                 (appendFile)
-import           Network.Socket               (HostName)
+import           Control.Concurrent      (Chan, MVar, ThreadId)
+import           Data.Aeson              (FromJSON (..), ToJSON (..),
+                                          Value (..), object, (.:), (.=))
+import           Data.Attoparsec.RFC2616 (Header (..))
+import           Data.ByteString         (concat)
+import qualified Data.ByteString         as BS
+import           Data.ByteString.Char8   (pack)
+import           Data.Map                (Map)
+import qualified Data.Map                as Map
+import           Data.Text.IO            (appendFile)
+import           Network.Socket          (HostName)
 
 import           Control.Monad.Reader
-import           Data.Binary                  (Binary, Get)
-import qualified Data.Binary                  as B
-import qualified Data.Collections             as Collections
+import           Data.Binary             (Binary, Get)
+import qualified Data.Binary             as B
+import qualified Data.Collections        as Collections
 import           Data.Cycle
 import           Data.IORef
-import           Snap.Core                    (Snap)
-import Paths_siberia
+import           Paths_siberia
+import           Snap.Core               (Snap)
 
 tempDir, musicDirectory, logFile :: FilePath
 tempDir = "/.music/"
@@ -52,42 +52,44 @@ type Channel = Maybe (Chan (Maybe ByteString))
 port :: Int
 port = 2000
 
-data Status = Status { connections          :: Int
-                     , connectProcess       :: Maybe ThreadId
-                     , bufferProcess        :: Maybe ThreadId
-                     , chanProcess          :: Maybe ThreadId
-                     , connectionsProcesses :: [ThreadId]
+type MProcess = Maybe ThreadId
+
+data Status = Status { connections          :: !Int
+                     , connectProcess       :: !MProcess
+                     , bufferProcess        :: !MProcess
+                     , chanProcess          :: !MProcess
+                     , connectionsProcesses :: ![ThreadId]
                      } deriving (Eq, Show)
 
 defStatus :: Status
 defStatus = Status 0 Nothing Nothing Nothing []
 
 
-data RadioInfo x = Proxy 
-  { rid      :: x
-  , url      :: Url
-  , pid      :: Status
-  , headers  :: Headers
-  , meta     :: Maybe Meta
-  , channel  :: Channel
-  , hostPort :: HostPort
-  , buff     :: Maybe (Buffer ByteString)
+data RadioInfo x = Proxy
+  { rid      :: !x
+  , url      :: !Url
+  , pid      :: !Status
+  , headers  :: !Headers
+  , meta     :: !(Maybe Meta)
+  , channel  :: !Channel
+  , hostPort :: !HostPort
+  , buff     :: !(Maybe (Buffer ByteString))
   }
                  | Local
-  { rid :: x
-  , pid :: Status
-  , headers :: Headers
-  , meta :: Maybe Meta
-  , channel :: Channel
-  , hostPort :: HostPort
-  , buff :: Maybe (Buffer ByteString)
-  , playlist :: Maybe Playlist
+  { rid      :: !x
+  , pid      :: !Status
+  , headers  :: !Headers
+  , meta     :: !(Maybe Meta)
+  , channel  :: !Channel
+  , hostPort :: !HostPort
+  , buff     :: !(Maybe (Buffer ByteString))
+  , playlist :: !(Maybe Playlist)
   }
-                 | ById 
-  { rid :: x } deriving (Eq)
+                 | ById
+  { rid :: !x } deriving (Eq)
 
-data Song = Song { sidi  :: Int
-                 , spath :: String
+data Song = Song { sidi  :: !Int
+                 , spath :: !String
                  } deriving (Eq, Show)
 
 type Playlist = Cycle Song
@@ -98,7 +100,7 @@ instance Ord Song where
 
 type Radio = RadioInfo RadioId
 
-data Store a = Store (MVar (Map RadioId (MVar a))) HostPort 
+data Store a = Store (MVar (Map RadioId (MVar a))) !HostPort
 
 type RadioStore = Store Radio
 
@@ -126,7 +128,7 @@ class Monoid a => RadioBuffer m a where
     getAll    :: m a -> IO a
 
 runWeb :: Web a -> RadioStore -> Snap a
-runWeb mw r = runReaderT mw r 
+runWeb mw r = runReaderT mw r
 
 
 class (Monad m, MonadIO m, MonadReader RadioStore m) => Allowed m
@@ -187,7 +189,7 @@ instance ToJSON Radio where
     toJSON _ = undefined
 
 instance FromJSON Radio where
-    parseJSON (Object x) =  Proxy <$> toRid (x .: "id") <*> (Url <$> x .: "url") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN 
+    parseJSON (Object x) =  Proxy <$> toRid (x .: "id") <*> (Url <$> x .: "url") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN
                         <|> Local <$> toRid (x .: "id") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> pN
         where toRid y = addSlash . RadioId <$> y
               pN = pure Nothing
@@ -239,13 +241,13 @@ instance Binary Url where
 instance Binary RadioId where
     put (RadioId x) = B.put x
     get = RadioId <$> B.get
-    
+
 instance Binary Song where
     put (Song x y) = B.put x >> B.put y
     get = Song <$> B.get <*> B.get
-    
+
 instance Binary Playlist where
-    put  = B.put . Collections.toList 
+    put  = B.put . Collections.toList
     get = Collections.fromList <$> B.get
 
 instance Binary Radio where
