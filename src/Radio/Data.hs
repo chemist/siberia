@@ -24,7 +24,7 @@ import qualified Data.Map               as Map
 import           Data.Text.IO                 (appendFile)
 import           Network.Socket               (HostName)
 
-import           Control.Monad.RWS.Lazy
+import           Control.Monad.Reader
 import           Data.Binary                  (Binary, Get)
 import qualified Data.Binary                  as B
 import qualified Data.Collections             as Collections
@@ -96,13 +96,9 @@ instance Ord Song where
     compare x y = compare (sidi x) (sidi y)
 
 
-
 type Radio = RadioInfo RadioId
-type AllPlaylist = Map.Map RadioId (MVar Playlist)
 
-data Store a = Store (MVar (Map RadioId (MVar a))) HostPort (MVar AllPlaylist)
-
-type State = AllPlaylist
+data Store a = Store (MVar (Map RadioId (MVar a))) HostPort 
 
 type RadioStore = Store Radio
 
@@ -112,9 +108,9 @@ instance Monoid Logger where
     mempty = Logger mempty
     mappend (Logger x) (Logger y) = Logger $ mappend x y
 
-type Application = RWST RadioStore Logger State IO
+type Application = ReaderT RadioStore IO
 
-type Web = RWST RadioStore Logger State Snap
+type Web = ReaderT RadioStore Snap
 
 data Buffer a = Buffer { active :: IORef (Cycle Int)
                        , buf    :: IORef (Cycle (IORef a))
@@ -135,14 +131,11 @@ class Monoid a => RadioBuffer m a where
     -- ** вернуть весь буфер в упорядоченном состоянии
     getAll    :: m a -> IO a
 
-runWeb :: Web a -> RadioStore -> State -> Snap a
-runWeb mw r s = do (a, _, Logger w) <- runRWST mw r s
-                   dataDir <- liftIO getDataDir
-                   liftIO $ appendFile (dataDir <> logFile) w
-                   return a
+runWeb :: Web a -> RadioStore -> Snap a
+runWeb mw r = runReaderT mw r 
 
 
-class (Monad m, MonadIO m, MonadReader RadioStore m, MonadWriter Logger m, MonadState State m) => Allowed m
+class (Monad m, MonadIO m, MonadReader RadioStore m) => Allowed m
 
 instance Allowed Application
 instance Allowed Web

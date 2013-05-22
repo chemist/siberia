@@ -30,7 +30,7 @@ import           System.IO.Streams.Concurrent as S
 
 import           Data.Attoparsec.RFC2616      (Request (..), request)
 
-import           Control.Monad.RWS.Lazy       hiding (getAll, listen)
+import           Control.Monad.Reader       
 import qualified Data.Collections             as Collections
 import           Data.Text.IO                 (appendFile)
 import           Paths_siberia
@@ -43,16 +43,11 @@ import           System.Directory
 musicFolder :: String
 musicFolder = "/music/"
 
-emptyStateS :: IO State
-emptyStateS = return Map.empty
-
 emptyStateR::IO RadioStore
 emptyStateR = do
     host <- getHostName
     a <- newMVar Map.empty
-    playlist' <- newMVar $ Collections.fromList[]
-    allPlaylist <- newMVar $ Map.fromList [(RadioId "/local", playlist')]
-    return $ Store a (Just (host, 2000)) allPlaylist
+    return $ Store a (Just (host, 2000)) 
 
 
 main::IO ()
@@ -61,10 +56,9 @@ main = do
 --     mainId <- myThreadId
     createDirectoryIfMissing True $ dataDir <> "/log"
     stateR <- emptyStateR
-    stateS <- emptyStateS
     -- | start web application
-    void . forkIO $ quickHttpServe $ void $ runWeb web stateR stateS
-    try $ runRWST (load $ dataDir <> "/radiobase") stateR stateS :: IO (Either SomeException ((),State, Logger))
+    void . forkIO $ quickHttpServe $ void $ runWeb web stateR 
+    try $ runReaderT (load $ dataDir <> "/radiobase") stateR  :: IO (Either SomeException ())
     -- | open socket
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1
@@ -74,8 +68,7 @@ main = do
     void . forever $ do
         (accepted, _) <- accept sock
         connected <- socketToStreams accepted
-        forkIO $ do (_, _, Logger w) <- runRWST (connectHandler connected  `finally`  (liftIO $ sClose accepted)) stateR stateS
-                    appendFile (dataDir <> logFile) w
+        forkIO $ runReaderT (connectHandler connected  `finally`  (liftIO $ sClose accepted)) stateR 
     sClose sock
     return ()
 

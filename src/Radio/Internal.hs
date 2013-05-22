@@ -33,8 +33,8 @@ import           System.IO.Streams                        as S
 import           System.IO.Streams.Attoparsec             as S
 import           System.IO.Streams.Concurrent             as S
 
-import           Control.Monad.RWS.Lazy
-import qualified Control.Monad.RWS.Lazy                   as M
+import           Control.Monad.Reader
+import qualified Control.Monad.Reader                   as M
 
 import           Blaze.ByteString.Builder                 (Builder)
 import qualified Blaze.ByteString.Builder                 as Builder
@@ -50,7 +50,7 @@ import qualified System.Process                           as P
 import Paths_siberia
 
 say :: Allowed m => Text -> m ()
-say x = tell . Logger $ x ++ "\n"
+say x = putStrLn $ x ++ "\n"
 
 save :: Allowed m => Prelude.FilePath -> m ()
 save path = do
@@ -82,11 +82,8 @@ makeChannel radio = do
       whenGood radioStreamInput' = do
           say "start good"
           stateR <- ask
-          stateS <- get
           let saveMeta :: Maybe Meta -> IO ()
-              saveMeta x = do (_, _, Logger w) <- runRWST (setD radio x) stateR stateS
-                              dataDir <- getDataDir
-                              appendFile (dataDir <> logFile) w
+              saveMeta x = runReaderT (setD radio x) stateR 
           chan <- liftIO newChan
           buf' <- liftIO $ new 60 :: Application (Buffer ByteString)
           setD radio (Just buf')
@@ -260,10 +257,9 @@ getStream' radio@Proxy{} = do
 
 -- * поток с локальных файлов
 getStream' radio@Local{} = do
-    state <- get
     reader <- ask
     handleIO <- liftIO $ newIORef Nothing
-    liftIO $ makeInputStream $ f state reader handleIO
+    liftIO $ makeInputStream $ f reader handleIO
     where
       getNextSong :: Application (Maybe FilePath)
       getNextSong = do
@@ -274,12 +270,12 @@ getStream' radio@Local{} = do
           setD radio newPlayList
           dataDir <- liftIO getDataDir
           return $ (<$>) concat $ sequence [pure dataDir, pure musicDirectory, pure (tail $ C.unpack channelDir), pure "/", sfile]
-      f:: State -> RadioStore -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
-      f state reader channelIO = do
+      f:: RadioStore -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
+      f reader channelIO = do
           maybeCh <- readIORef channelIO
           case maybeCh of
                Nothing -> do
-                   (file, _) <- evalRWST getNextSong reader state
+                   file <- runReaderT getNextSong reader 
                    case file of
                         Nothing -> do
                             print "empty playlist"
@@ -288,14 +284,14 @@ getStream' radio@Local{} = do
                             print file
                             channel <- runFFmpeg file'
                             writeIORef channelIO $ Just channel
-                            f state reader channelIO
+                            f reader channelIO
                Just ch -> do
                    !chunk <- S.read ch
                    case chunk of
                         Just c -> return $! Just c
                         Nothing -> do
                             writeIORef channelIO Nothing
-                            f state reader channelIO
+                            f reader channelIO
                                      
 bUFSIZ = 32752
 
@@ -349,10 +345,10 @@ instance Monoid a => RadioBuffer Buffer a where
 instance Allowed m => Storable m Radio where
     member (ById (RadioId "/test")) = return True
     member r = do
-        (Store x _ _) <- ask
+        (Store x _) <- ask
         liftIO $ withMVar x $ \y -> return $ rid r `Map.member` y
     create r = do
-        (Store x hp _) <- ask
+        (Store x hp) <- ask
         let withPort = addHostPort hp r
         is <- member r
         if is
@@ -362,7 +358,7 @@ instance Allowed m => Storable m Radio where
                liftIO $ modifyMVar_ x $ \mi -> return $ Map.insert (rid r) mv mi
                return (True, withPort)
     remove r = do
-        (Store x _ _) <- ask
+        (Store x _) <- ask
         is <- member r
         if is
            then do
@@ -370,13 +366,13 @@ instance Allowed m => Storable m Radio where
                return True
            else return False
     list = do
-        (Store x _ _) <- ask
+        (Store x _) <- ask
         liftIO $ withMVar x fromMVar
         where
           fromMVar :: Map RadioId (MVar Radio) -> IO [Radio]
           fromMVar y = Prelude.mapM (\(_, mv) -> withMVar mv return) $ Map.toList y
     info a = do
-        (Store x _ _) <- ask
+        (Store x _) <- ask
         liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (rid a) y
     -- | @TODO catch exception
     
