@@ -74,6 +74,7 @@ data RadioInfo x = Proxy
   , channel  :: !Channel
   , hostPort :: !HostPort
   , buff     :: !(Maybe (Buffer ByteString))
+  , countIO  :: IO Int64
   }
                  | Local
   { rid      :: !x
@@ -84,9 +85,14 @@ data RadioInfo x = Proxy
   , hostPort :: !HostPort
   , buff     :: !(Maybe (Buffer ByteString))
   , playlist :: !(Maybe Playlist)
+  , countIO  :: IO Int64
   }
                  | ById
-  { rid :: !x } deriving (Eq)
+  { rid :: !x } 
+  
+instance Eq Radio where
+    x == y = rid x == rid y
+    
 
 data Song = Song { sidi  :: !Int
                  , spath :: !String
@@ -189,8 +195,8 @@ instance ToJSON Radio where
     toJSON _ = undefined
 
 instance FromJSON Radio where
-    parseJSON (Object x) =  Proxy <$> toRid (x .: "id") <*> (Url <$> x .: "url") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN
-                        <|> Local <$> toRid (x .: "id") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> pN
+    parseJSON (Object x) =  Proxy <$> toRid (x .: "id") <*> (Url <$> x .: "url") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> (pure $ return 0)
+                        <|> Local <$> toRid (x .: "id") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> pN <*> (pure $ return 0)
         where toRid y = addSlash . RadioId <$> y
               pN = pure Nothing
               pD = pure defStatus
@@ -265,10 +271,10 @@ instance Binary Radio where
                   0 -> do
                       r <- B.get :: Get RadioId
                       u <- B.get :: Get Url
-                      return $ Proxy r u defStatus [] Nothing Nothing Nothing Nothing
+                      return $ Proxy r u defStatus [] Nothing Nothing Nothing Nothing (return 0)
                   1 -> do
                       r <- B.get
                       p <- B.get
-                      return $ Local r defStatus [] Nothing Nothing Nothing Nothing p
+                      return $ Local r defStatus [] Nothing Nothing Nothing Nothing p (return 0)
                   _ -> undefined
 

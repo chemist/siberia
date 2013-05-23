@@ -94,7 +94,8 @@ makeChannel radio = do
           say "have meta int"
           say $ show metaInt
           chanStreamOutput <- liftIO $ S.chanToOutput chan
-          chanStreamInput  <- liftIO $ S.chanToInput  chan
+          (chanStreamInput, countInputBytes)  <- liftIO $ S.countInput =<< S.chanToInput  chan
+          setD radio countInputBytes
           outputBuffer <- liftIO $ bufferToOutput buf'
           say "have output buffer"
           (p1,p2) <- liftIO $ connectWithRemoveMetaAndBuffering metaInt saveMeta 8192 radioStreamInput' chanStreamOutput
@@ -203,7 +204,7 @@ bufferToOutput buf' = makeOutputStream f
 {-# INLINE bufferToOutput #-}
 
 getStream :: Radio -> Application (InputStream ByteString)
-getStream radio = getStream' =<< (getD radio :: Application (RadioInfo RadioId))
+getStream radio = getStream' =<< (getD radio :: Application Radio)
 
 getStream' :: Radio -> Application (InputStream ByteString)
 -- * тестовый поток
@@ -393,9 +394,7 @@ setter :: (Radio -> Radio) -> MVar Radio -> IO ()
 setter x  =  flip modifyMVar_ (return . x)
 
 instance Allowed m => Detalization m (RadioInfo RadioId) where
-    getD radio = do
-        i <- info radio 
-        liftIO $ withMVar i $ \x -> return x
+    getD radio = info radio >>= liftIO . (flip withMVar return)
     setD = undefined
 
 instance Allowed m => Detalization m Url where
@@ -469,5 +468,9 @@ instance Allowed m => Detalization m (Maybe Playlist) where
         i <- info radio 
         liftIO $ void (try $ setter (\y -> y { playlist = a}) i :: IO (Either SomeException ()))
 
+
+instance Allowed m => Detalization m (IO Int64) where
+    getD radio = info radio >>= liftIO . getter countIO
+    setD radio a = info radio >>= liftIO . setter (\y -> y {countIO = a})
 
 

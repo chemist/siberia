@@ -8,8 +8,8 @@ import           BasicPrelude                 hiding (FilePath, appendFile,
                                                concat, length, splitAt)
 import qualified Prelude
 
-import           Control.Concurrent           (forkIO, myThreadId, newMVar,
-                                               threadDelay)
+import           Control.Concurrent           (ThreadId, forkIO, myThreadId,
+                                               newMVar, threadDelay)
 import           Control.Concurrent.Chan      (dupChan)
 
 import           Data.ByteString              (concat, length)
@@ -30,7 +30,7 @@ import           System.IO.Streams.Concurrent as S
 
 import           Data.Attoparsec.RFC2616      (Request (..), request)
 
-import           Control.Monad.Reader       
+import           Control.Monad.Reader
 import qualified Data.Collections             as Collections
 import           Data.Text.IO                 (appendFile)
 import           Paths_siberia
@@ -47,7 +47,7 @@ emptyStateR::IO RadioStore
 emptyStateR = do
     host <- getHostName
     a <- newMVar Map.empty
-    return $ Store a (Just (host, 2000)) 
+    return $ Store a (Just (host, 2000))
 
 
 main::IO ()
@@ -57,7 +57,7 @@ main = do
     createDirectoryIfMissing True $ dataDir <> "/log"
     stateR <- emptyStateR
     -- | start web application
-    void . forkIO $ quickHttpServe $ void $ runWeb web stateR 
+    void . forkIO $ quickHttpServe $ void $ runWeb web stateR
     try $ runReaderT (load $ dataDir <> "/radiobase") stateR  :: IO (Either SomeException ())
     -- | open socket
     sock <- socket AF_INET Stream defaultProtocol
@@ -68,7 +68,7 @@ main = do
     void . forever $ do
         (accepted, _) <- accept sock
         connected <- socketToStreams accepted
-        forkIO $ runReaderT (connectHandler connected  `finally`  (liftIO $ sClose accepted)) stateR 
+        forkIO $ runReaderT (connectHandler connected  `finally`  (liftIO $ sClose accepted)) stateR
     sClose sock
     return ()
 
@@ -105,6 +105,23 @@ connectHandler (iS, oS) = do
     showType :: SomeException -> String
     showType = Prelude.show . typeOf
 
+
+killSlowClient :: ThreadId -> IO Int64 -> Radio -> Application ()
+killSlowClient pid outCount radio = killSlowClient' pid outCount =<< getD radio
+
+killSlowClient' :: ThreadId -> IO Int64 -> Radio -> Application ()
+killSlowClient' pid outCount radio = do
+    st <- ask
+    void . liftIO $ forkIO $ runReaderT work st
+    where 
+    work = forever $ do
+        inC <- liftIO =<< getD radio :: Application Int64
+        outC <- liftIO outCount
+        liftIO $ print $ "input " ++ show inC
+        liftIO $ print $ "output " ++ show outC
+        liftIO $ threadDelay 1000000
+        
+
 makeClient :: OutputStream ByteString -> Radio -> Application ()
 makeClient oS radio = do
     chan <- getD radio :: Application Channel
@@ -119,7 +136,8 @@ makeClient oS radio = do
              Just buf' <- getD radio :: Application (Maybe (Buffer ByteString))
              duplicate <- liftIO $ dupChan chan''
              start <- liftIO $ S.fromByteString successRespo
-             input <- liftIO $ S.chanToInput duplicate
+             (input, outCount) <- liftIO $ S.countInput =<< S.chanToInput duplicate
+             killSlowClient pid outCount radio
              birst <- liftIO $ getAll buf'
              say $ show $ "from birst" ++ (Prelude.show $ length birst)
              birst' <- liftIO $ S.fromByteString birst
