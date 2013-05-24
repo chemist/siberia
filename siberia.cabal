@@ -26,7 +26,7 @@ Data-Files: static/css/admin.css,
             radiobase
 
 executable siberia
-  main-is: Main.hs             
+  main-is: Siberia.hs             
   other-modules: Paths_siberia      
   build-depends:       base ==4.5.*, 
                        mtl ==2.1.*,

@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Radio.Web where
+module Siberia.Web where
 
 import           Control.Applicative
 import           Control.Monad
@@ -20,7 +20,7 @@ import           Data.List              (sort)
 import           Data.Maybe             (fromJust, isJust, isNothing)
 import qualified Data.Text              as T
 import           Debug.Trace
-import           Radio.Internal
+import           Siberia.Internal
 import           Snap.Util.FileUploads
 import           System.Directory
 import Paths_siberia

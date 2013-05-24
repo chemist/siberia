@@ -5,7 +5,7 @@
 {-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE TypeSynonymInstances   #-}
 
-module Radio.Data where
+module Siberia.Data where
 
 import           BasicPrelude            hiding (FilePath, Map, appendFile,
                                           concat, mapM)
@@ -33,11 +33,13 @@ import           Data.IORef
 import           Paths_siberia
 import           Snap.Core               (Snap)
 
+-- | const paths
 tempDir, musicDirectory, logFile :: FilePath
 tempDir = "/.music/"
 musicDirectory = "/music/"
 logFile = "/log/siberia.log"
 
+-- | const max size for uploaded files
 limitSizeForUpload :: Int64
 limitSizeForUpload = 10000000
 
@@ -65,8 +67,8 @@ defStatus :: Status
 defStatus = Status 0 Nothing Nothing Nothing []
 
 
-data RadioInfo x = Proxy
-  { rid      :: !x
+data Radio = Proxy
+  { rid      :: !RadioId
   , url      :: !Url
   , pid      :: !Status
   , headers  :: !Headers
@@ -77,7 +79,7 @@ data RadioInfo x = Proxy
   , countIO  :: IO Int64
   }
                  | Local
-  { rid      :: !x
+  { rid      :: !RadioId
   , pid      :: !Status
   , headers  :: !Headers
   , meta     :: !(Maybe Meta)
@@ -88,7 +90,7 @@ data RadioInfo x = Proxy
   , countIO  :: IO Int64
   }
                  | ById
-  { rid :: !x } 
+  { rid :: !RadioId } 
   
 instance Eq Radio where
     x == y = rid x == rid y
@@ -103,16 +105,12 @@ type Playlist = Cycle Song
 instance Ord Song where
     compare x y = compare (sidi x) (sidi y)
 
+data Store = Store (MVar (Map RadioId (MVar Radio))) !HostPort
 
-type Radio = RadioInfo RadioId
 
-data Store a = Store (MVar (Map RadioId (MVar a))) !HostPort
+type Application = ReaderT Store IO
 
-type RadioStore = Store Radio
-
-type Application = ReaderT RadioStore IO
-
-type Web = ReaderT RadioStore Snap
+type Web = ReaderT Store Snap
 
 data Buffer a = Buffer { active :: IORef (Cycle Int)
                        , buf    :: IORef (Cycle (IORef a))
@@ -133,11 +131,11 @@ class Monoid a => RadioBuffer m a where
     -- ** вернуть весь буфер в упорядоченном состоянии
     getAll    :: m a -> IO a
 
-runWeb :: Web a -> RadioStore -> Snap a
+runWeb :: Web a -> Store -> Snap a
 runWeb mw r = runReaderT mw r
 
 
-class (Monad m, MonadIO m, MonadReader RadioStore m) => Allowed m
+class (Monad m, MonadIO m, MonadReader Store m) => Allowed m
 
 instance Allowed Application
 instance Allowed Web
@@ -277,4 +275,5 @@ instance Binary Radio where
                       p <- B.get
                       return $ Local r defStatus [] Nothing Nothing Nothing Nothing p (return 0)
                   _ -> undefined
+
 

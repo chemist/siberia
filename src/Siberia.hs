@@ -2,7 +2,9 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 
-module Main where
+module Main (
+main 
+) where
 
 import           BasicPrelude                 hiding (FilePath, appendFile,
                                                concat, length, splitAt)
@@ -34,37 +36,40 @@ import           Control.Monad.Reader
 import qualified Data.Collections             as Collections
 import           Data.Text.IO                 (appendFile)
 import           Paths_siberia
-import           Radio.Internal
-import           Radio.Web                    (web)
+import           Siberia.Internal
+import           Siberia.Web                    (web)
 import           Snap.Http.Server             (quickHttpServe)
 import           System.Directory
 
 
+-- | const directory with music files
 musicFolder :: String
 musicFolder = "/music/"
 
-emptyStateR::IO RadioStore
+-- | empty state
+emptyStateR::IO Store
 emptyStateR = do
     host <- getHostName
     a <- newMVar Map.empty
     return $ Store a (Just (host, 2000))
 
 
+-- | start server
 main::IO ()
 main = do
     dataDir <- getDataDir
 --     mainId <- myThreadId
     createDirectoryIfMissing True $ dataDir <> "/log"
     stateR <- emptyStateR
-    -- | start web application
+    --  start web application
     void . forkIO $ quickHttpServe $ void $ runWeb web stateR
     try $ runReaderT (load $ dataDir <> "/radiobase") stateR  :: IO (Either SomeException ())
-    -- | open socket
+    --  open socket
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1
     bindSocket sock (SockAddrInet (toEnum port) 0)
     listen sock 100
-    -- | allways accept connection
+    --  allways accept connection
     void . forever $ do
         (accepted, _) <- accept sock
         connected <- socketToStreams accepted
@@ -97,7 +102,7 @@ connectHandler (iS, oS) = do
              say $ show headers'
              makeClient oS channel'
           else do
-           -- | unknown rid
+           --  unknown rid
              say $ show request'
              say $ show headers'
              liftIO $ S.write (Just "ICY 404 Not Found\r\n") oS
@@ -108,18 +113,18 @@ connectHandler (iS, oS) = do
 
 killSlowClient :: ThreadId -> IO Int64 -> Radio -> Application ()
 killSlowClient pid outCount radio = killSlowClient' pid outCount =<< getD radio
-
-killSlowClient' :: ThreadId -> IO Int64 -> Radio -> Application ()
-killSlowClient' pid outCount radio = do
-    st <- ask
-    void . liftIO $ forkIO $ runReaderT work st
-    where 
-    work = forever $ do
-        inC <- liftIO =<< getD radio :: Application Int64
-        outC <- liftIO outCount
-        liftIO $ print $ "input " ++ show inC
-        liftIO $ print $ "output " ++ show outC
-        liftIO $ threadDelay 1000000
+  where
+  killSlowClient' :: ThreadId -> IO Int64 -> Radio -> Application ()
+  killSlowClient' pid outCount radio = do
+      st <- ask
+      void . liftIO $ forkIO $ runReaderT work st
+      where 
+      work = forever $ do
+          inC <- liftIO =<< getD radio :: Application Int64
+          outC <- liftIO outCount
+          liftIO $ print $ "input " ++ show inC
+          liftIO $ print $ "output " ++ show outC
+          liftIO $ threadDelay 1000000
         
 
 makeClient :: OutputStream ByteString -> Radio -> Application ()
@@ -167,33 +172,4 @@ successRespo = concat [ "ICY 200 OK\r\n"
                       , "icy-metaint: 8192\n"
                       , "icy-br: 128\r\n\r\n"
                       ]
-
-
--- big = RI (RadioId "/big") (Url "http://radio.bigblueswing.com:8002") Nothing [] Nothing Nothing
-
-testUrl :: ByteString
-testUrl = "http://bigblueswing.com:2002"
-
-testUrl1 :: ByteString
-testUrl1 = "http://bigblueswing.com"
-
-testUrl2 :: ByteString
-testUrl2 = "http://bigblueswing.com:2002/asdf"
-
-testUrl3 ::ByteString
-testUrl3 = "http://bigblueswing.com/asdf"
-
-testreq :: ByteString
-testreq = concat [ "HTTP/1.0 200 OK\r\n"
-                 , "Content-Type:audio/mpeg\r\n"
-                 , "icy-br:128\r\n"
-                 , "icy-description:UNC Charlotte's Radio Station\r\n"
-                 , "icy-genre:College Progressive\r\n"
-                 , "icy-name:Radio Free Charlotte\r\n"
-                 , "icy-pub:1\r\n"
-                 , "icy-url:http://rfclive.uncc.edu:8000/listen.m3u\r\n"
-                 , "Server:Icecast 2.3.2\r\n"
-                 , "Cache-Control: no-cache\r\n\r\n"
-                 ]
-
 

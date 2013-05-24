@@ -4,8 +4,8 @@
 {-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE TypeSynonymInstances   #-}
 {-# LANGUAGE RecordWildCards   #-}
-module Radio.Internal (
-  module Radio.Data
+module Siberia.Internal (
+  module Siberia.Data
   , makeChannel
   , load
   , save
@@ -48,13 +48,15 @@ import           Data.Cycle
 import           Data.IORef
 import           Data.Text.Encoding                       as E
 import           Data.Text.IO                             (appendFile)
-import           Radio.Data
+import           Siberia.Data
 import qualified System.Process                           as P
 import Paths_siberia
 
+-- | for log messages
 say :: Allowed m => Text -> m ()
 say x = putStrLn x 
 
+-- | save state to disk
 save :: Allowed m => Prelude.FilePath -> m ()
 save path = do
     l <- list :: Allowed m => m [Radio]
@@ -62,6 +64,7 @@ save path = do
     M.mapM_ (\x -> say $ show x ) l
     liftIO $ LS.writeFile path $ encode l
 
+-- | load state from disk
 load :: Allowed m => Prelude.FilePath -> m ()
 load path = do
     l <- liftIO $ LS.readFile path
@@ -72,7 +75,7 @@ load path = do
     return ()
 
 
--- | создаем канал
+-- | create channel
 makeChannel::Radio -> Application ()
 makeChannel radio = do
     say "start make channel"
@@ -96,14 +99,14 @@ makeChannel radio = do
           chanStreamOutput <- liftIO $ S.chanToOutput chan
           (chanStreamInput, countInputBytes)  <- liftIO $ S.countInput =<< S.chanToInput  chan
           setD radio countInputBytes
-          outputBuffer <- liftIO $ bufferToOutput buf'
+          outputBuffer <- liftIO $ outputStreamFromBuffer buf'
           say "have output buffer"
           (p1,p2) <- liftIO $ connectWithRemoveMetaAndBuffering metaInt saveMeta 8192 radioStreamInput' chanStreamOutput
           p3 <-  liftIO $ forkIO $ S.connect chanStreamInput outputBuffer
           setD radio $ Status 0 (Just p1) (Just p2) (Just p3) []
           setD radio (Just chan :: Maybe (Chan (Maybe ByteString)))
           say "finish output buffer"
-          -- | @TODO save pid
+          --  TODO save pid
           return ()
       unpackMeta :: [ByteString] -> Maybe Int
       unpackMeta meta' = do
@@ -111,12 +114,13 @@ makeChannel radio = do
           (a,_) <- C.readInt m
           return a
 
-connectWithRemoveMetaAndBuffering ::Maybe Int                -- ^ meta int
-                                  -> (Maybe Meta -> IO ())   -- ^ запись мета информации в состояние
-                                  -> Int                      -- ^ размер чанка для буферизированного вывода
-                                  -> InputStream ByteString   -- ^ входной поток
-                                  -> OutputStream ByteString  -- ^ выходной поток
-                                  -> IO (ThreadId, ThreadId)
+-- | Parse stream, remove meta info from stream, bufferize, save meta info in state
+connectWithRemoveMetaAndBuffering ::Maybe Int                -- ^meta int
+                                  -> (Maybe Meta -> IO ())     -- ^save meta info to state
+                                  -> Int                      -- ^buffer size
+                                  -> InputStream ByteString   -- ^input stream
+                                  -> OutputStream ByteString  -- ^output stream
+                                  -> IO (ThreadId, ThreadId)  -- ^return pids
 connectWithRemoveMetaAndBuffering Nothing _ buffSize is os = do
     builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
     ps <- S.parserToInputStream toBuilder is
@@ -133,9 +137,11 @@ connectWithRemoveMetaAndBuffering (Just metaInt) saveMeta buffSize is os = do
     return (x,y)
 {-# INLINE connectWithRemoveMetaAndBuffering #-}
 
+-- | builder parser
 toBuilder :: A.Parser (Maybe Builder)
 toBuilder = (A.endOfInput >> pure Nothing) <|> Just . Builder.fromByteString <$> A.take 32752
 
+-- | meta info parser
 metaParser :: Int -> A.Parser (Maybe (Builder, Meta))
 metaParser metaInt = (A.endOfInput >> pure Nothing) <|> Just <$> do
     body <- A.take metaInt
@@ -143,20 +149,23 @@ metaParser metaInt = (A.endOfInput >> pure Nothing) <|> Just <$> do
     meta <- A.take len
     return (Builder.fromByteString body, Meta (meta, len))
 
+-- | unpack meta info size
 toLen :: ByteString -> Int
 toLen x = let [w] = BS.unpack x
           in 16 * fromIntegral w
 
 newtype Chunk = Chunk ByteString
 
+-- | chunk parser 
 toChunks :: Int -> A.Parser (Maybe Chunk)
 toChunks metaInt = (A.endOfInput >> pure Nothing) <|> Just . Chunk <$> A.take metaInt
 
+-- | input >-< output and add meta info
 connectWithAddMetaAndBuffering :: Maybe Int       -- ^ meta int
-                               ->  IO (Maybe Meta) -- ^ получить мета информацию
-                               ->  Int             -- ^ размер буфера
-                               ->  InputStream ByteString
-                               ->  OutputStream ByteString
+                               ->  IO (Maybe Meta) -- ^ get meta info
+                               ->  Int             -- ^ buffer size
+                               ->  InputStream ByteString -- ^ input stream
+                               ->  OutputStream ByteString -- ^ output stream
                                ->  IO ()
 connectWithAddMetaAndBuffering Nothing _ buffSize is os = do
     builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
@@ -196,113 +205,117 @@ connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
 {-# INLINE connectWithAddMetaAndBuffering #-}
 
 
-bufferToOutput :: Buffer ByteString -> IO (OutputStream ByteString)
-bufferToOutput buf' = makeOutputStream f
+-- | make stream from buffer
+outputStreamFromBuffer :: Buffer ByteString -> IO (OutputStream ByteString)
+outputStreamFromBuffer buf' = makeOutputStream f
    where
    f Nothing = return $! ()
    f (Just x) = update x buf'
-{-# INLINE bufferToOutput #-}
+{-# INLINE outputStreamFromBuffer #-}
 
+-- | create stream 
 getStream :: Radio -> Application (InputStream ByteString)
 getStream radio = getStream' =<< (getD radio :: Application Radio)
-
-getStream' :: Radio -> Application (InputStream ByteString)
--- * тестовый поток
-getStream' (ById (RadioId "/test")) = liftIO $ S.fromGenerator $ genStream fakeRadioStream'
   where
-    fakeRadioStream' :: [ByteString]
-    fakeRadioStream' = BasicPrelude.map (\x -> (E.encodeUtf8 . show) x <> " ") [1.. ]
-
-    genStream :: [ByteString] -> S.Generator ByteString ()
-    genStream x = do
-        let (start, stop) = splitAt 1024 x
-        S.yield $ mconcat start
-        liftIO $ threadDelay 100000
-        genStream stop
-
--- * proxy поток
-getStream' radio@Proxy{} = do
-    (i, o) <- openConnection radio
-    let Url url' = url radio
-    let Right path = parseOnly parsePath url'
-        req = "GET " <> path <> " HTTP/1.0\r\nicy-metadata: 1\r\n\r\n"
-    say "url from radio"
-    say $ show url'
-    say "request to server"
-    say $ show req
-    requestStream <- liftIO $ S.fromByteString req
-    liftIO $ S.connect requestStream o
-    (response', headers') <- liftIO $ S.parseFromStream response i
-    -- | @TODO обработать исключения
-    setD radio headers'
-    say $ show response'
-    say $ show headers'
-    say "makeConnect end"
-    return i
+  -- for testing only
+  getStream' :: Radio -> Application (InputStream ByteString)
+  getStream' (ById (RadioId "/test")) = liftIO $ S.fromGenerator $ genStream fakeRadioStream'
     where
-      -- | открываем соединение до стрим сервера
-      openConnection :: Radio -> Application (InputStream ByteString, OutputStream ByteString)
-      openConnection radio = do
-          let Url url' = url radio
-          let Right (hb, pb) = parseOnly parseUrl url'
-              h = C.unpack hb
-              p = C.unpack pb
-          say $ show h
-          say $ show p
-          is <- liftIO $ getAddrInfo (Just hints) (Just h) (Just p)
-          let addr = head is
-          let a = addrAddress addr
-          s <- liftIO $  socket (addrFamily addr) Stream defaultProtocol
-          liftIO $ Network.Socket.connect s a
-          (i,o) <- liftIO $ S.socketToStreams s
-          return (i, o)
-          where
-             hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
-
--- * поток с локальных файлов
-getStream' radio@Local{} = do
-    reader <- ask
-    handleIO <- liftIO $ newIORef Nothing
-    liftIO $ makeInputStream $ f reader handleIO
-    where
-      getNextSong :: Application (Maybe FilePath)
-      getNextSong = do
-          playList' <- getD radio :: Application (Maybe Playlist)
-          let sfile = spath . getValue <$> playList'
-              newPlayList = goRight <$> playList'
-              RadioId channelDir = rid radio
-          setD radio newPlayList
-          dataDir <- liftIO getDataDir
-          return $ (<$>) concat $ sequence [pure dataDir, pure musicDirectory, pure (tail $ C.unpack channelDir), pure "/", sfile]
-      f:: RadioStore -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
-      f reader channelIO = do
-          maybeCh <- readIORef channelIO
-          case maybeCh of
-               Nothing -> do
-                   file <- runReaderT getNextSong reader 
-                   case file of
-                        Nothing -> do
-                            print "empty playlist"
-                            return Nothing
-                        Just file' -> do
-                            print file
-                            channel <- runFFmpeg file'
-                            writeIORef channelIO $ Just channel
-                            f reader channelIO
-               Just ch -> do
-                   !chunk <- S.read ch
-                   case chunk of
-                        Just c -> return $! Just c
-                        Nothing -> do
-                            writeIORef channelIO Nothing
-                            f reader channelIO
-                                     
+      fakeRadioStream' :: [ByteString]
+      fakeRadioStream' = BasicPrelude.map (\x -> (E.encodeUtf8 . show) x <> " ") [1.. ]
+  
+      genStream :: [ByteString] -> S.Generator ByteString ()
+      genStream x = do
+          let (start, stop) = splitAt 1024 x
+          S.yield $ mconcat start
+          liftIO $ threadDelay 100000
+          genStream stop
+  
+  -- proxy stream  
+  getStream' radio@Proxy{} = do
+      (i, o) <- openConnection radio
+      let Url url' = url radio
+      let Right path = parseOnly parsePath url'
+          req = "GET " <> path <> " HTTP/1.0\r\nicy-metadata: 1\r\n\r\n"
+      say "url from radio"
+      say $ show url'
+      say "request to server"
+      say $ show req
+      requestStream <- liftIO $ S.fromByteString req
+      liftIO $ S.connect requestStream o
+      (response', headers') <- liftIO $ S.parseFromStream response i
+      --  @TODO обработать исключения
+      setD radio headers'
+      say $ show response'
+      say $ show headers'
+      say "makeConnect end"
+      return i
+      where
+        -- | открываем соединение до стрим сервера
+        openConnection :: Radio -> Application (InputStream ByteString, OutputStream ByteString)
+        openConnection radio = do
+            let Url url' = url radio
+            let Right (hb, pb) = parseOnly parseUrl url'
+                h = C.unpack hb
+                p = C.unpack pb
+            say $ show h
+            say $ show p
+            is <- liftIO $ getAddrInfo (Just hints) (Just h) (Just p)
+            let addr = head is
+            let a = addrAddress addr
+            s <- liftIO $  socket (addrFamily addr) Stream defaultProtocol
+            liftIO $ Network.Socket.connect s a
+            (i,o) <- liftIO $ S.socketToStreams s
+            return (i, o)
+            where
+               hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
+  
+  -- local stream
+  getStream' radio@Local{} = do
+      reader <- ask
+      handleIO <- liftIO $ newIORef Nothing
+      liftIO $ makeInputStream $ f reader handleIO
+      where
+        getNextSong :: Application (Maybe FilePath)
+        getNextSong = do
+            playList' <- getD radio :: Application (Maybe Playlist)
+            let sfile = spath . getValue <$> playList'
+                newPlayList = goRight <$> playList'
+                RadioId channelDir = rid radio
+            setD radio newPlayList
+            dataDir <- liftIO getDataDir
+            return $ (<$>) concat $ sequence [pure dataDir, pure musicDirectory, pure (tail $ C.unpack channelDir), pure "/", sfile]
+        f:: Store -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
+        f reader channelIO = do
+            maybeCh <- readIORef channelIO
+            case maybeCh of
+                 Nothing -> do
+                     file <- runReaderT getNextSong reader 
+                     case file of
+                          Nothing -> do
+                              print "empty playlist"
+                              return Nothing
+                          Just file' -> do
+                              print file
+                              channel <- runFFmpeg file'
+                              writeIORef channelIO $ Just channel
+                              f reader channelIO
+                 Just ch -> do
+                     !chunk <- S.read ch
+                     case chunk of
+                          Just c -> return $! Just c
+                          Nothing -> do
+                              writeIORef channelIO Nothing
+                              f reader channelIO
+                                       
+-- buffer size
 bUFSIZ = 32752
-
+  
+-- const ffmpeg 
 command :: String
 command = "ffmpeg -re -i - -f mp3 -acodec copy -"
 
-
+-- | create InputStream from file
 runFFmpeg ::String ->  IO (S.InputStream BS.ByteString)
 runFFmpeg filename = do
     (i, o, e, ph ) <- S.runInteractiveCommand command
@@ -315,8 +328,6 @@ runFFmpeg filename = do
     return o
     where fun :: S.OutputStream BS.ByteString -> S.InputStream BS.ByteString -> IO ()
           fun os is = S.connect is os
-
-
 
 
 instance Monoid a => RadioBuffer Buffer a where
@@ -363,7 +374,7 @@ instance Allowed m => Storable m Radio where
                return (True, withPort)
     remove r = do
         (Store x _) <- ask
-        -- | @TODO прибить все пользовательские потоки, прибить процессы из статуса
+        --  @TODO прибить все пользовательские потоки, прибить процессы из статуса
         is <- member r
         if is
            then do
@@ -379,8 +390,10 @@ instance Allowed m => Storable m Radio where
     info a = do
         (Store x _) <- ask
         liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (rid a) y
-    -- | @TODO catch exception
+    --  @TODO catch exception
     
+
+
 
 
 addHostPort::HostPort -> Radio -> Radio
@@ -393,7 +406,7 @@ getter x =  flip  withMVar (return . x)
 setter :: (Radio -> Radio) -> MVar Radio -> IO ()
 setter x  =  flip modifyMVar_ (return . x)
 
-instance Allowed m => Detalization m (RadioInfo RadioId) where
+instance Allowed m => Detalization m Radio where
     getD radio = info radio >>= liftIO . (flip withMVar return)
     setD = undefined
 
