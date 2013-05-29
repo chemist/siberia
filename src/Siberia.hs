@@ -1,6 +1,7 @@
 -- | Simple shoutcast server for streaming audio broadcast.
 
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Main (
 main 
@@ -10,9 +11,9 @@ import           BasicPrelude                 hiding (FilePath, appendFile,
                                                concat, length, splitAt)
 import qualified Prelude
 
-import           Control.Concurrent           (ThreadId, forkIO, myThreadId,
+import           Control.Concurrent           (ThreadId, forkIO, myThreadId, killThread,
                                                newMVar, threadDelay)
-import           Control.Concurrent.Chan      (dupChan)
+import           Control.Concurrent.Chan      (dupChan, getChanContents)
 
 import           Data.ByteString              (concat, length)
 
@@ -40,6 +41,14 @@ import           Siberia.Internal
 import           Siberia.Web                    (web)
 import           Snap.Http.Server             (quickHttpServe)
 import           System.Directory
+import qualified Control.Monad.State as ST
+
+
+import Network.Socket             (Socket)
+import qualified Network.Socket.ByteString  as N
+import qualified Data.ByteString.Char8      as C
+import Data.IORef
+import System.Mem
 
 
 -- | const directory with music files
@@ -53,10 +62,14 @@ emptyStateR = do
     a <- newMVar Map.empty
     return $ Store a (Just (host, 2000))
 
-
 -- | start server
 main::IO ()
 main = do
+    forkIO $ forever $ do
+        -- start garbage collector every 30 s
+        -- for test 
+        performGC
+        threadDelay 30000000
     dataDir <- getDataDir
 --     mainId <- myThreadId
     createDirectoryIfMissing True $ dataDir <> "/log"
@@ -73,7 +86,7 @@ main = do
     void . forever $ do
         (accepted, _) <- accept sock
         connected <- socketToStreams accepted
-        forkIO $ runReaderT (connectHandler connected  `finally`  (liftIO $ sClose accepted)) stateR
+        forkIO $ runReaderT (connectHandler connected  `finally`  (liftIO $ (say "close accepted" >> sClose accepted))) stateR
     sClose sock
     return ()
 
@@ -111,22 +124,6 @@ connectHandler (iS, oS) = do
     showType = Prelude.show . typeOf
 
 
-killSlowClient :: ThreadId -> IO Int64 -> Radio -> Application ()
-killSlowClient pid outCount radio = killSlowClient' pid outCount =<< getD radio
-  where
-  killSlowClient' :: ThreadId -> IO Int64 -> Radio -> Application ()
-  killSlowClient' pid outCount radio = do
-      st <- ask
-      void . liftIO $ forkIO $ runReaderT work st
-      where 
-      work = forever $ do
-          inC <- liftIO =<< getD radio :: Application Int64
-          outC <- liftIO outCount
-          liftIO $ print $ "input " ++ show inC
-          liftIO $ print $ "output " ++ show outC
-          liftIO $ threadDelay 1000000
-        
-
 makeClient :: OutputStream ByteString -> Radio -> Application ()
 makeClient oS radio = do
     chan <- getD radio :: Application Channel
@@ -141,8 +138,20 @@ makeClient oS radio = do
              Just buf' <- getD radio :: Application (Maybe (Buffer ByteString))
              duplicate <- liftIO $ dupChan chan''
              start <- liftIO $ S.fromByteString successRespo
-             (input, outCount) <- liftIO $ S.countInput =<< S.chanToInput duplicate
-             killSlowClient pid outCount radio
+             (input, countOut) <- liftIO $ S.countInput =<< S.chanToInput duplicate
+             countIn <- getD radio :: Application (IO Int64)
+             catchSlowClient <- liftIO $ forkIO $ do
+                 start <- newIORef =<<  countIn
+                 forever $ do
+                     s <- readIORef start
+                     cI <- countIn
+                     cO <- countOut
+                     when (((cI - s) - cO) > 300000) $ do
+                         say $ "slow client detected " ++ show pid ++ " diff " ++ (show ((cI - s) - cO))
+                         killThread pid
+                         !_ <- liftIO $! getChanContents duplicate
+                         return ()
+                     threadDelay 5000000
              birst <- liftIO $ getAll buf'
              say $ show $ "from birst" ++ (Prelude.show $ length birst)
              birst' <- liftIO $ S.fromByteString birst
@@ -151,9 +160,11 @@ makeClient oS radio = do
              say "supply start"
              liftIO $ S.supply start oS
              say "supply end"
-             fin <- liftIO $ try $ connectWithAddMetaAndBuffering (Just 8192) getMeta 4096 withoutMeta oS  :: Application (Either SomeException ())
+             fin <- liftIO $ try $ connectWithAddMetaAndBuffering (Just 8192) getMeta 32752 withoutMeta oS  :: Application (Either SomeException ())
              either whenError whenGood fin
              say "make finally work"
+             liftIO $ killThread catchSlowClient >> say "kill catchSlowClient"
+             return ()
          Nothing -> liftIO $ S.write (Just "ICY 423 Locked\r\n") oS
     removeClientPid pid radio
     where

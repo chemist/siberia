@@ -2,8 +2,8 @@
 {-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE OverloadedStrings      #-}
+{-# LANGUAGE RecordWildCards        #-}
 {-# LANGUAGE TypeSynonymInstances   #-}
-{-# LANGUAGE RecordWildCards   #-}
 module Siberia.Internal (
   module Siberia.Data
   , makeChannel
@@ -16,11 +16,11 @@ module Siberia.Internal (
   , removeClientPid
   ) where
 
-import           BasicPrelude                             hiding (FilePath, Map, 
+import           BasicPrelude                             hiding (FilePath, Map,
                                                            appendFile)
 import           Control.Concurrent                       hiding (yield)
-import qualified Data.Map                                as Map
-import Data.Map (Map)
+import           Data.Map                                 (Map)
+import qualified Data.Map                                 as Map
 import           Prelude                                  (FilePath)
 import qualified Prelude
 
@@ -30,14 +30,16 @@ import           Data.Attoparsec.RFC2616
 import qualified Data.ByteString                          as BS
 import qualified Data.ByteString.Char8                    as C
 import qualified Data.ByteString.Lazy                     as LS
+import           Data.IORef
 import           Data.Maybe                               (fromJust)
 import           Network.Socket
 import           System.IO.Streams                        as S
 import           System.IO.Streams.Attoparsec             as S
 import           System.IO.Streams.Concurrent             as S
+import           System.IO.Streams.Internal               as S
 
 import           Control.Monad.Reader
-import qualified Control.Monad.Reader                   as M
+import qualified Control.Monad.Reader                     as M
 
 import           Blaze.ByteString.Builder                 (Builder)
 import qualified Blaze.ByteString.Builder                 as Builder
@@ -48,13 +50,13 @@ import           Data.Cycle
 import           Data.IORef
 import           Data.Text.Encoding                       as E
 import           Data.Text.IO                             (appendFile)
+import           Paths_siberia
 import           Siberia.Data
 import qualified System.Process                           as P
-import Paths_siberia
 
 -- | for log messages
-say :: Allowed m => Text -> m ()
-say x = putStrLn x 
+say :: MonadIO m => Text -> m ()
+say x = putStrLn x
 
 -- | save state to disk
 save :: Allowed m => Prelude.FilePath -> m ()
@@ -89,7 +91,7 @@ makeChannel radio = do
           say "start good"
           stateR <- ask
           let saveMeta :: Maybe Meta -> IO ()
-              saveMeta x = runReaderT (setD radio x) stateR 
+              saveMeta x = runReaderT (setD radio x) stateR
           chan <- liftIO newChan
           buf' <- liftIO $ new 60 :: Application (Buffer ByteString)
           setD radio (Just buf')
@@ -156,7 +158,7 @@ toLen x = let [w] = BS.unpack x
 
 newtype Chunk = Chunk ByteString
 
--- | chunk parser 
+-- | chunk parser
 toChunks :: Int -> A.Parser (Maybe Chunk)
 toChunks metaInt = (A.endOfInput >> pure Nothing) <|> Just . Chunk <$> A.take metaInt
 
@@ -180,6 +182,7 @@ connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
         return $ Just $ maybe (Meta ("", 0)) id m
     refMeta <- newIORef $ Just (Meta ("", 0))
     withMeta <- S.zipWithM (fun refMeta) chunked metas
+    ref <- newIORef 0
     S.connect withMeta builder
     where
     fun:: IORef (Maybe Meta) -> Chunk -> Meta -> IO Builder
@@ -213,7 +216,7 @@ outputStreamFromBuffer buf' = makeOutputStream f
    f (Just x) = update x buf'
 {-# INLINE outputStreamFromBuffer #-}
 
--- | create stream 
+-- | create stream
 getStream :: Radio -> Application (InputStream ByteString)
 getStream radio = getStream' =<< (getD radio :: Application Radio)
   where
@@ -223,15 +226,15 @@ getStream radio = getStream' =<< (getD radio :: Application Radio)
     where
       fakeRadioStream' :: [ByteString]
       fakeRadioStream' = BasicPrelude.map (\x -> (E.encodeUtf8 . show) x <> " ") [1.. ]
-  
+
       genStream :: [ByteString] -> S.Generator ByteString ()
       genStream x = do
           let (start, stop) = splitAt 1024 x
           S.yield $ mconcat start
           liftIO $ threadDelay 100000
           genStream stop
-  
-  -- proxy stream  
+
+  -- proxy stream
   getStream' radio@Proxy{} = do
       (i, o) <- openConnection radio
       let Url url' = url radio
@@ -269,7 +272,7 @@ getStream radio = getStream' =<< (getD radio :: Application Radio)
             return (i, o)
             where
                hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
-  
+
   -- local stream
   getStream' radio@Local{} = do
       reader <- ask
@@ -290,13 +293,13 @@ getStream radio = getStream' =<< (getD radio :: Application Radio)
             maybeCh <- readIORef channelIO
             case maybeCh of
                  Nothing -> do
-                     file <- runReaderT getNextSong reader 
+                     file <- runReaderT getNextSong reader
                      case file of
                           Nothing -> do
-                              print "empty playlist"
+                              say "empty playlist"
                               return Nothing
                           Just file' -> do
-                              print file
+                              say $ show file
                               channel <- runFFmpeg file'
                               writeIORef channelIO $ Just channel
                               f reader channelIO
@@ -307,11 +310,11 @@ getStream radio = getStream' =<< (getD radio :: Application Radio)
                           Nothing -> do
                               writeIORef channelIO Nothing
                               f reader channelIO
-                                       
+
 -- buffer size
 bUFSIZ = 32752
-  
--- const ffmpeg 
+
+-- const ffmpeg
 command :: String
 command = "ffmpeg -re -i - -f mp3 -acodec copy -"
 
@@ -323,8 +326,8 @@ runFFmpeg filename = do
                 S.withFileAsInput filename (fun i)
                 S.connect e nullOutput
                 exitCode <- P.waitForProcess ph
-                print exitCode
-                print "next song"
+                say $ show exitCode
+                say "next song"
     return o
     where fun :: S.OutputStream BS.ByteString -> S.InputStream BS.ByteString -> IO ()
           fun os is = S.connect is os
@@ -391,7 +394,7 @@ instance Allowed m => Storable m Radio where
         (Store x _) <- ask
         liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (rid a) y
     --  @TODO catch exception
-    
+
 
 
 
@@ -417,14 +420,14 @@ instance Allowed m => Detalization m Url where
 instance Allowed m => Detalization m Status where
     getD radio = info radio >>= liftIO . getter pid
     setD radio a = info radio >>= liftIO . setter (\y -> y { pid = a })
-    
+
 saveClientPid :: ThreadId -> Radio -> Application ()
 saveClientPid t radio = do
     s@Status{..} <- getD radio :: Application Status
     say "add client pid"
     say $ show s
     setD radio $ Status (connections + 1) connectProcess bufferProcess chanProcess (t:connectionsProcesses)
-    
+
 removeClientPid :: ThreadId -> Radio -> Application ()
 removeClientPid t radio = removeClientPid' t =<< (getD radio :: Application Radio)
 
@@ -450,8 +453,8 @@ removeClientPid' t radio@Local{} = do
     say $ show s
     when ((connections - 1) == 0) $ do
         say "last user go away"
-        
-           
+
+
 
 instance Allowed m => Detalization m Headers where
     getD radio = info radio >>= liftIO . getter headers
@@ -472,13 +475,13 @@ instance Allowed m => Detalization m (Maybe (Buffer ByteString)) where
 
 instance Allowed m => Detalization m (Maybe Playlist) where
     getD radio = do
-        i <- info radio 
-        liftIO $ withMVar i fun 
-        where 
+        i <- info radio
+        liftIO $ withMVar i fun
+        where
           fun x@Local{} = return $ playlist x
           fun _ = return Nothing
     setD radio a = do
-        i <- info radio 
+        i <- info radio
         liftIO $ void (try $ setter (\y -> y { playlist = a}) i :: IO (Either SomeException ()))
 
 
