@@ -192,7 +192,7 @@ deleteStreamHandler = do
     maybe (errorWWW 400) rmSt param
     where
       rmSt i = do
-          result <-  remove $ ById (RadioId i)
+          result <-  remove (toById i)
           errorWWW (if result then 200 else 403)
 
 

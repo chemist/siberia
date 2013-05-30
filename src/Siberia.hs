@@ -48,6 +48,7 @@ import Network.Socket             (Socket)
 import qualified Network.Socket.ByteString  as N
 import qualified Data.ByteString.Char8      as C
 import Data.IORef
+import Control.Concurrent.MVar
 import System.Mem
 
 
@@ -126,13 +127,20 @@ connectHandler (iS, oS) = do
 
 makeClient :: OutputStream ByteString -> Radio -> Application ()
 makeClient oS radio = do
-    chan <- getD radio :: Application Channel
-    when (isNothing chan) $ do
-        makeChannel radio
-        liftIO $ threadDelay 1000000
+    let wait :: Int -> Application ()
+        wait i | i < 3 = do
+            chan <- getD radio :: Application Channel
+            case chan of
+                 Just _ -> return ()
+                 Nothing -> do
+                     makeChannel radio
+                     liftIO $ threadDelay 1000000
+                     wait (i + 1)
+              | otherwise = return ()
+    wait 0 
+    chan' <- getD radio :: Application Channel
     pid <- liftIO $ myThreadId
     saveClientPid pid radio
-    chan' <- getD radio :: Application Channel
     case chan' of
          Just chan'' -> do
              Just buf' <- getD radio :: Application (Maybe (Buffer ByteString))

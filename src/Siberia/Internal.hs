@@ -332,7 +332,11 @@ runFFmpeg filename = do
     where fun :: S.OutputStream BS.ByteString -> S.InputStream BS.ByteString -> IO ()
           fun os is = S.connect is os
 
-saveClientPid :: ThreadId -> Radio -> Application ()
+kill :: MProcess -> IO ()
+kill (Just x) = killThread x
+kill Nothing = return ()
+        
+saveClientPid :: Allowed m => ThreadId -> Radio -> m ()
 saveClientPid t radio = savePid =<< info radio
     where 
     savePid mv = liftIO $ modifyMVar_ mv fun
@@ -346,7 +350,7 @@ saveClientPid t radio = savePid =<< info radio
                                       }
             in return $ r { pid = newStatus }
 
-removeClientPid :: ThreadId -> Radio -> Application ()
+removeClientPid :: Allowed m => ThreadId -> Radio -> m ()
 removeClientPid t mv = removePid =<< info mv
     where
     removePid mv = liftIO $ modifyMVar_ mv fun
@@ -362,9 +366,9 @@ removeClientPid t mv = removePid =<< info mv
              (Proxy{..}, True) -> do
                  say "last user go away"
                  say "kill proxy radio channel"
-                 killThread $ fromJust $ connectProcess oldStatus
-                 killThread $ fromJust $ chanProcess oldStatus
-                 killThread $ fromJust $ bufferProcess oldStatus
+                 kill $ connectProcess oldStatus
+                 kill $ chanProcess oldStatus
+                 kill $ bufferProcess oldStatus
              _ -> return ()
         return $ r { pid = newStatus }
 
@@ -412,13 +416,28 @@ instance Allowed m => Storable m Radio where
                return (True, withPort)
     remove r = do
         (Store x _) <- ask
-        --  @TODO прибить все пользовательские потоки, прибить процессы из статуса
         is <- member r
+        say $ "remove channel" ++ show r ++ show is
         if is
            then do
-               liftIO $ modifyMVar_ x $ \mi -> return $ Map.delete (rid r) mi
+               Status{..} <- getD r :: Allowed m => m Status
+               M.mapM_ (liftIO . killThread) connectionsProcesses
+               wait (getD r) 
+               liftIO $ do
+                   say "remove radio channel"
+                   kill connectProcess
+                   kill chanProcess
+                   kill bufferProcess
+                   modifyMVar_ x $ \mi -> return $ Map.delete (rid r) mi
                return True
            else return False
+        where
+        wait :: Allowed m => m Status -> m ()
+        wait s = do
+            Status{..} <- s
+            case connectionsProcesses of
+                 [] -> return ()
+                 _ -> (liftIO $ threadDelay 200000) >> wait s 
     list = do
         (Store x _) <- ask
         liftIO $ withMVar x fromMVar
@@ -427,7 +446,10 @@ instance Allowed m => Storable m Radio where
           fromMVar y = Prelude.mapM (\(_, mv) -> withMVar mv return) $ Map.toList y
     info a = do
         (Store x _) <- ask
-        liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (rid a) y
+        r <- liftIO $ withMVar x $ \y -> return $ Map.lookup (rid a) y
+        case r of
+             Just x -> return x
+             Nothing -> undefined
     --  @TODO catch exception
 
 addHostPort::HostPort -> Radio -> Radio
