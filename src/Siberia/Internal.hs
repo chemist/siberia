@@ -332,6 +332,41 @@ runFFmpeg filename = do
     where fun :: S.OutputStream BS.ByteString -> S.InputStream BS.ByteString -> IO ()
           fun os is = S.connect is os
 
+saveClientPid :: ThreadId -> Radio -> Application ()
+saveClientPid t radio = savePid =<< info radio
+    where 
+    savePid mv = liftIO $ modifyMVar_ mv fun
+    fun :: Radio -> IO Radio 
+    fun r = let oldStatus = pid r
+                newConnections = 1 + (connections oldStatus)
+                newConnectionsProcesses = t:(connectionsProcesses oldStatus)
+                
+                newStatus = oldStatus { connections = newConnections
+                                      , connectionsProcesses = newConnectionsProcesses
+                                      }
+            in return $ r { pid = newStatus }
+
+removeClientPid :: ThreadId -> Radio -> Application ()
+removeClientPid t mv = removePid =<< info mv
+    where
+    removePid mv = liftIO $ modifyMVar_ mv fun
+    fun :: Radio -> IO Radio
+    fun r = do
+        let oldStatus = pid r
+            newConnections = (connections oldStatus) - 1
+            newConnectionsProcesses = Prelude.filter (/= t) (connectionsProcesses oldStatus)
+            newStatus = oldStatus { connections = newConnections
+                                  , connectionsProcesses = newConnectionsProcesses
+                                  }
+        liftIO $ forkIO $ case (r, newConnections == 0) of
+             (Proxy{..}, True) -> do
+                 say "last user go away"
+                 say "kill proxy radio channel"
+                 killThread $ fromJust $ connectProcess oldStatus
+                 killThread $ fromJust $ chanProcess oldStatus
+                 killThread $ fromJust $ bufferProcess oldStatus
+             _ -> return ()
+        return $ r { pid = newStatus }
 
 instance Monoid a => RadioBuffer Buffer a where
     new n = do
@@ -395,10 +430,6 @@ instance Allowed m => Storable m Radio where
         liftIO $ withMVar x $ \y -> return $ fromJust $ Map.lookup (rid a) y
     --  @TODO catch exception
 
-
-
-
-
 addHostPort::HostPort -> Radio -> Radio
 addHostPort hp x = x { hostPort = hp }
 
@@ -420,42 +451,7 @@ instance Allowed m => Detalization m Url where
 instance Allowed m => Detalization m Status where
     getD radio = info radio >>= liftIO . getter pid
     setD radio a = info radio >>= liftIO . setter (\y -> y { pid = a })
-
-saveClientPid :: ThreadId -> Radio -> Application ()
-saveClientPid t radio = do
-    s@Status{..} <- getD radio :: Application Status
-    say "add client pid"
-    say $ show s
-    setD radio $ Status (connections + 1) connectProcess bufferProcess chanProcess (t:connectionsProcesses)
-
-removeClientPid :: ThreadId -> Radio -> Application ()
-removeClientPid t radio = removeClientPid' t =<< (getD radio :: Application Radio)
-
-removeClientPid' :: ThreadId -> Radio -> Application ()
-removeClientPid' t radio@Proxy{} = do
-    s@Status{..} <- getD radio :: Application Status
-    setD radio $ Status (connections - 1) connectProcess bufferProcess chanProcess (Prelude.filter (/= t) connectionsProcesses)
-    say "remove client pid"
-    say $ show s
-    when ((connections - 1) == 0) $ do
-        say "last user go away"
-        say "kill proxy radio channel"
-        liftIO $ do
-            killThread $ fromJust connectProcess
-            killThread $ fromJust chanProcess
-            killThread $ fromJust bufferProcess
-        setD radio (Nothing :: Channel)
-        setD radio (Nothing :: Maybe (Buffer ByteString))
-removeClientPid' t radio@Local{} = do
-    s@Status{..} <- getD radio :: Application Status
-    setD radio $ Status (connections - 1) connectProcess bufferProcess chanProcess (Prelude.filter (/= t) connectionsProcesses)
-    say "remove client pid"
-    say $ show s
-    when ((connections - 1) == 0) $ do
-        say "last user go away"
-
-
-
+           
 instance Allowed m => Detalization m Headers where
     getD radio = info radio >>= liftIO . getter headers
     setD radio a = info radio >>= liftIO . setter (\y -> y { headers = a })
@@ -483,7 +479,6 @@ instance Allowed m => Detalization m (Maybe Playlist) where
     setD radio a = do
         i <- info radio
         liftIO $ void (try $ setter (\y -> y { playlist = a}) i :: IO (Either SomeException ()))
-
 
 instance Allowed m => Detalization m (IO Int64) where
     getD radio = info radio >>= liftIO . getter countIO
