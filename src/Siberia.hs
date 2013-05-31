@@ -66,11 +66,13 @@ emptyStateR = do
 -- | start server
 main::IO ()
 main = do
+    {-
     forkIO $ forever $ do
         -- start garbage collector every 30 s
         -- for test 
         performGC
         threadDelay 30000000
+        -}
     dataDir <- getDataDir
 --     mainId <- myThreadId
     createDirectoryIfMissing True $ dataDir <> "/log"
