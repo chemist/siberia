@@ -67,12 +67,12 @@ ratedStream fn = do
     properties <- getAudio fn
     case properties of
          (Just audio, Just tag) -> ratedStream' (bitRate audio) fn
-         _ -> S.makeInputStream (pure Nothing)
+         _ -> S.nullInput
     where
     ratedStream' :: Int -> String -> IO (S.InputStream ByteString)
     ratedStream' bit fn = do
         handle <- openBinaryFile fn ReadMode
-        handleToInputStream bit handle
+        S.atEndOfInput (hClose handle) =<< handleToInputStream bit handle
 
 handleToInputStream :: Int -> Handle -> IO (S.InputStream ByteString)
 handleToInputStream rate h = do
@@ -88,12 +88,8 @@ handleToInputStream rate h = do
   f rate size time = do
       x <- BS.hGetSome h bUFSIZ
       s <- atomicModifyIORef size $ \x -> (x + bUFSIZ, x + bUFSIZ)
-      pause $ toDouble $ s * 8
-      if BS.null x 
-         then do
-             hClose h 
-             return $! Nothing 
-         else return $! Just x
+      void . pause $ toDouble $ s * 8
+      return $! if BS.null x then Nothing else Just x
       where 
       pause :: Double -> IO ()
       pause s = do
