@@ -30,6 +30,8 @@ executable siberia
   other-modules: Paths_siberia      
   build-depends:       base ==4.5.*, 
                        mtl ==2.1.*,
+                       time ==1.4.*,
+                       libtagc ==0.12.*,
                        bytestring ==0.9.*, 
                        io-streams ==1.1.*, 
                        process ==1.1.*, 

@@ -53,6 +53,7 @@ import           Data.Text.IO                             (appendFile)
 import           Paths_siberia
 import           Siberia.Data
 import qualified System.Process                           as P
+import Siberia.Streamer
 
 -- | for log messages
 say :: MonadIO m => Text -> m ()
@@ -300,7 +301,8 @@ getStream radio = getStream' =<< (getD radio :: Application Radio)
                               return Nothing
                           Just file' -> do
                               say $ show file
-                              channel <- runFFmpeg file'
+                            --  channel <-  runFFmpeg file'
+                              channel <- ratedStream file'
                               writeIORef channelIO $ Just channel
                               f reader channelIO
                  Just ch -> do
