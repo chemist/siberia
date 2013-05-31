@@ -49,4 +49,4 @@ executable siberia
                        blaze-builder ==0.3.*, 
                        binary ==0.5.*
   hs-source-dirs:      src
-  GHC-Options: -O2
+  GHC-Options: -O2 -threaded

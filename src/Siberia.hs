@@ -82,7 +82,7 @@ main = do
     sock <- socket AF_INET Stream defaultProtocol
     setSocketOption sock ReuseAddr 1
     bindSocket sock (SockAddrInet (toEnum port) 0)
-    listen sock 100
+    listen sock 10000
     --  allways accept connection
     void . forever $ do
         (accepted, _) <- accept sock
