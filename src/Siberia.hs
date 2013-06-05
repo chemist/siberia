@@ -26,7 +26,7 @@ import           Network.Socket               (Family (AF_INET),
                                                SocketType (Stream), accept,
                                                bindSocket, defaultProtocol,
                                                listen, sClose, setSocketOption,
-                                               socket)
+                                               socket, Socket)
 import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
@@ -44,7 +44,6 @@ import           System.Directory
 import qualified Control.Monad.State as ST
 
 
-import Network.Socket             (Socket)
 import qualified Network.Socket.ByteString  as N
 import qualified Data.ByteString.Char8      as C
 import Data.IORef
