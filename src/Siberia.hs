@@ -1,18 +1,18 @@
 -- | Simple shoutcast server for streaming audio broadcast.
 
+{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE BangPatterns #-}
 
 module Main (
-main 
+main
 ) where
 
 import           BasicPrelude                 hiding (FilePath, appendFile,
                                                concat, length, splitAt)
 import qualified Prelude
 
-import           Control.Concurrent           (ThreadId, forkIO, myThreadId, killThread,
-                                               newMVar, threadDelay)
+import           Control.Concurrent           (ThreadId, forkIO, killThread,
+                                               myThreadId, newMVar, threadDelay)
 import           Control.Concurrent.Chan      (dupChan, getChanContents)
 
 import           Data.ByteString              (concat, length)
@@ -21,12 +21,12 @@ import qualified Data.Map                     as Map
 
 import           Network.BSD                  (getHostName)
 import           Network.Socket               (Family (AF_INET),
-                                               SockAddr (SockAddrInet),
+                                               SockAddr (SockAddrInet), Socket,
                                                SocketOption (ReuseAddr),
                                                SocketType (Stream), accept,
                                                bindSocket, defaultProtocol,
                                                listen, sClose, setSocketOption,
-                                               socket, Socket)
+                                               socket)
 import           System.IO.Streams            as S
 import           System.IO.Streams.Attoparsec as S
 import           System.IO.Streams.Concurrent as S
@@ -34,21 +34,21 @@ import           System.IO.Streams.Concurrent as S
 import           Data.Attoparsec.RFC2616      (Request (..), request)
 
 import           Control.Monad.Reader
+import qualified Control.Monad.State          as ST
 import qualified Data.Collections             as Collections
 import           Data.Text.IO                 (appendFile)
 import           Paths_siberia
 import           Siberia.Internal
-import           Siberia.Web                    (web)
+import           Siberia.Web                  (web)
 import           Snap.Http.Server             (quickHttpServe)
 import           System.Directory
-import qualified Control.Monad.State as ST
 
 
-import qualified Network.Socket.ByteString  as N
-import qualified Data.ByteString.Char8      as C
-import Data.IORef
-import Control.Concurrent.MVar
-import System.Mem
+import           Control.Concurrent.MVar
+import qualified Data.ByteString.Char8        as C
+import           Data.IORef
+import qualified Network.Socket.ByteString    as N
+import           System.Mem
 
 
 -- | const directory with music files
@@ -68,7 +68,8 @@ main = do
     {-
     forkIO $ forever $ do
         -- start garbage collector every 30 s
-        -- for test 
+        -- for test
+        -- @TODO hello
         performGC
         threadDelay 30000000
         -}
@@ -129,16 +130,17 @@ connectHandler (iS, oS) = do
 makeClient :: OutputStream ByteString -> Radio -> Application ()
 makeClient oS radio = do
     let wait :: Int -> Application ()
-        wait i | i < 3 = do
-            chan <- getD radio :: Application Channel
-            case chan of
+        wait i
+          | i < 3 = do
+              chan <- getD radio :: Application Channel
+              case chan of
                  Just _ -> return ()
                  Nothing -> do
                      makeChannel radio
                      liftIO $ threadDelay 1000000
                      wait (i + 1)
-              | otherwise = return ()
-    wait 0 
+          | otherwise = return ()
+    wait 0
     chan' <- getD radio :: Application Channel
     pid <- liftIO $ myThreadId
     saveClientPid pid radio

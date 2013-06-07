@@ -7,12 +7,15 @@ import           Control.Monad.RWS.Lazy (liftIO)
 import           Data.Aeson
 import           Data.ByteString        (ByteString)
 import           Data.ByteString.Char8  (pack, unpack)
+import Data.ByteString.Lazy (fromStrict)
+import qualified Data.ByteString.Lazy as LB
+import qualified Data.ByteString as B
 import           Data.Monoid            ((<>))
-import           Snap.Core              (Method (..), dir, emptyResponse,
+import           Snap.Core              (Method (..), dir, redirect, emptyResponse,
                                          finishWith, getParam, ifTop, method,
                                          readRequestBody, route,
-                                         setResponseCode, writeLBS,
-                                         writeLBS, writeText)
+                                         setResponseCode, writeLBS, writeBS,
+                                         writeText)
 import           Snap.Util.FileServe    (serveDirectory, serveFile)
 
 import qualified Data.Collections       as Collections
@@ -20,10 +23,15 @@ import           Data.List              (sort)
 import           Data.Maybe             (fromJust, isJust, isNothing)
 import qualified Data.Text              as T
 import           Debug.Trace
+import           Paths_siberia
 import           Siberia.Internal
+import           Siberia.YandexDisk
 import           Snap.Util.FileUploads
 import           System.Directory
-import Paths_siberia
+import qualified Network.Http.Client as H
+import qualified System.IO.Streams as S
+import OpenSSL (withOpenSSL)
+import Network.HTTP.Base (urlEncode)
 
 
 web :: Web ()
@@ -35,6 +43,8 @@ web =  liftIO getDataDir >>= \dataDir -> ifTop (serveFile $ dataDir <> "/static/
                               , ("stream/:sid/stats", streamStatsHandler )
                               , ("playlist/:sid",         getPlaylist)
                               , ("save", saveHandler)
+                              , ("ya/:sid" , yandexHandler)
+                              , ("verification_code", yandexOauth)
                               ] )
        <|> method POST ( route [ ("stream/:sid", postStreamHandler )
                                , ("playlist/:sid", changePlaylist)
@@ -44,6 +54,55 @@ web =  liftIO getDataDir >>= \dataDir -> ifTop (serveFile $ dataDir <> "/static/
                                  , ("audio/:sid/:fid" , deleteSong)
                                  ] )
        <|> dir "static" (serveDirectory (dataDir <> "/static"))
+
+
+yandexHandler :: Web ()
+yandexHandler = do
+    sid <- getParam "sid"
+    maybe (errorWWW 400) codeRequest sid
+    where 
+    codeRequest st = redirect $ "https://oauth.yandex.ru/authorize?response_type=code&client_id=" <> idYandex <> "&state=" <> st
+
+{-
+ POST /token HTTP/1.1
+ Host: oauth.yandex.ru
+ Content-type: application/x-www-form-urlencoded
+ Content-Length: <length>
+
+grant_type=authorization_code&code=<code>&client_id=<client_id>&client_secret=<client_secret>
+-}
+yandexOauth :: Web ()
+yandexOauth = do
+    st <- getParam "state"
+    cd <- getParam "code"
+    case (st, cd) of
+         (Just st', Just cd') -> getToken (fromStrict st') cd'
+         _ -> errorWWW 400
+    where
+    getToken sid tokenCode = do
+        let req = "grant_type=authorization_code&code=" 
+                <> tokenCode 
+                <> "&client_id=" 
+                <> idYandex 
+                <> "&client_secret=" 
+                <> passYandex
+            nvs = [ ("grant_type", "authorization_code")
+                  , ("code", tokenCode)
+                  , ("client_id", idYandex)
+                  , ("client_secret", passYandex)
+                  ]
+            reqSize = length $ unpack req
+        liftIO $ withOpenSSL $ do
+            ctx <- H.baselineContextSSL
+            c <- H.openConnectionSSL ctx oauthUrlYandex 443
+            q <- liftIO $ H.buildRequest $ do
+                H.http H.POST oauthPathYandex
+                H.setContentType "application/x-www-form-urlencoded"
+                H.setContentLength $ fromIntegral reqSize
+            _ <- H.sendRequest c q (H.encodedFormBody nvs)
+            H.receiveResponse c H.debugHandler
+        writeLBS $ "channel id " <> sid <> " code from yandex " <> fromStrict tokenCode
+    
 
 statsHandler :: Web ()
 statsHandler = writeText "stats"
@@ -106,9 +165,9 @@ postSongAdd = do
           liftIO $ createDirectoryIfMissing True $ dataDir <> musicDirectory <> unpack i
       perPartUploadPolicy :: PartInfo -> PartUploadPolicy
       perPartUploadPolicy _ = allowWithMaximumSize limitSizeForUpload
-      
+
       handlerUploads :: String -> [(PartInfo, Either PolicyViolationException FilePath)] -> Web ()
-      handlerUploads channelFolder = mapM_ fun 
+      handlerUploads channelFolder = mapM_ fun
           where fun :: (PartInfo, Either PolicyViolationException FilePath) -> Web ()
                 fun (p, Left e) = say . T.pack $ "\nerror when upload file \n\t" ++ show p ++ "\t" ++ show e
                 fun (p, Right path) = do
@@ -120,8 +179,8 @@ postSongAdd = do
                     case pl :: Maybe Playlist of
                          Nothing -> setD (toById (pack channelFolder)) $ Just (Collections.singleton $ Song 0 filename :: Playlist)
                          Just pl' -> do
-                             let Song n _ = Collections.maximum pl' 
-                             setD (toById (pack channelFolder)) $ Just $ Collections.insert (Song (n + 1) filename) pl' 
+                             let Song n _ = Collections.maximum pl'
+                             setD (toById (pack channelFolder)) $ Just $ Collections.insert (Song (n + 1) filename) pl'
 
 -- | delete song from playlist
 -- dont remove file from filesystem
