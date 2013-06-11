@@ -94,7 +94,7 @@ makeChannel radio = do
           let saveMeta :: Maybe Meta -> IO ()
               saveMeta x = runReaderT (setD radio x) stateR
           chan <- liftIO newChan
-          buf' <- liftIO $ new 60 :: Application (Buffer ByteString)
+          buf' <- liftIO $ new 20 :: Application (Buffer ByteString)
           setD radio (Just buf')
           metaInt <- unpackMeta <$> (lookupHeader "icy-metaint" <$> getD radio) :: Application (Maybe Int)
           say "have meta int"

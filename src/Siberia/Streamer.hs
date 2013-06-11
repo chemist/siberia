@@ -66,30 +66,34 @@ ratedStream :: String -> IO (S.InputStream ByteString)
 ratedStream fn = do
     properties <- getAudio fn
     case properties of
-         (Just audio, Just tag) -> ratedStream' (bitRate audio) fn
+         (Just audio, Just tag) -> ratedStream' (duration audio) (bitRate audio) fn
          _ -> S.nullInput
     where
-    ratedStream' :: Int -> String -> IO (S.InputStream ByteString)
-    ratedStream' bit fn = do
+    ratedStream' :: Int -> Int -> String -> IO (S.InputStream ByteString)
+    ratedStream' songTime bit fn = do
         handle <- openBinaryFile fn ReadMode
-        S.atEndOfInput (hClose handle) =<< handleToInputStream bit handle
+        S.atEndOfInput (hClose handle) =<< handleToInputStream songTime bit handle
 
-handleToInputStream :: Int -> Handle -> IO (S.InputStream ByteString)
-handleToInputStream rate h = do
+handleToInputStream :: Int -> Int -> Handle -> IO (S.InputStream ByteString)
+handleToInputStream songTime rate h = do
     let rate' = toDouble $ 1024 * rate 
+    lock <- newEmptyMVar 
+    forkIO $ threadDelay (songTime * 1000000) >> putMVar lock ()
     size <- newIORef 0
     time <- getCurrentTime
-    S.makeInputStream (f rate' size time)
+    S.makeInputStream (f lock rate' size time)
   where
   toDouble :: Real a => a -> Double
   toDouble = fromRational . toRational
   
-  f :: Double -> (IORef Int) -> UTCTime -> IO (Maybe ByteString)
-  f rate size time = do
+  f :: MVar () -> Double -> (IORef Int) -> UTCTime -> IO (Maybe ByteString)
+  f lock rate size time = do
       x <- BS.hGetSome h bUFSIZ
       s <- atomicModifyIORef size $ \x -> (x + bUFSIZ, x + bUFSIZ)
       void . pause $ toDouble $ s * 8
-      return $! if BS.null x then Nothing else Just x
+      if BS.null x
+         then readMVar lock >> return Nothing
+         else return $! Just x
       where 
       pause :: Double -> IO ()
       pause s = do

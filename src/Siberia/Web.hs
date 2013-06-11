@@ -3,6 +3,7 @@ module Siberia.Web where
 
 import           Control.Applicative
 import           Control.Monad
+import Control.Monad.IO.Class
 import           Control.Monad.RWS.Lazy (liftIO)
 import           Data.Aeson
 import           Data.ByteString        (ByteString)
@@ -12,10 +13,12 @@ import qualified Data.ByteString.Lazy as LB
 import qualified Data.ByteString as B
 import           Data.Monoid            ((<>))
 import           Snap.Core              (Method (..), dir, redirect, emptyResponse,
-                                         finishWith, getParam, ifTop, method,
-                                         readRequestBody, route,
+                                         finishWith, getParam, ifTop, method, getRequest,
+                                         readRequestBody, route, routeLocal,
                                          setResponseCode, writeLBS, writeBS,
                                          writeText)
+import qualified Snap.Core as SC
+import qualified Snap.Internal.Http.Types as SC
 import           Snap.Util.FileServe    (serveDirectory, serveFile)
 
 import qualified Data.Collections       as Collections
@@ -36,7 +39,7 @@ import Network.HTTP.Base (urlEncode)
 
 web :: Web ()
 web =  liftIO getDataDir >>= \dataDir -> ifTop (serveFile $ dataDir <> "/static/index.html")
-       <|> method GET ( route [ ("server/stats", statsHandler )
+       <|> method GET ( routeLocal [ ("server/stats", statsHandler )
                               , ("stream", getStreamHandler )
                               , ("stream/:sid", streamHandlerById )
                               , ("stream/:sid/metadata", streamMetaHandler )
@@ -46,22 +49,21 @@ web =  liftIO getDataDir >>= \dataDir -> ifTop (serveFile $ dataDir <> "/static/
                               , ("ya/:sid" , yandexHandler)
                               , ("verification_code", yandexOauth)
                               ] )
-       <|> method POST ( route [ ("stream/:sid", postStreamHandler )
+       <|> method POST ( routeLocal [ ("stream/:sid", postStreamHandler )
                                , ("playlist/:sid", changePlaylist)
                                , ("audio/:sid"  , postSongAdd)
                                ] )
-       <|> method DELETE ( route [ ("stream/:sid", deleteStreamHandler )
+       <|> method DELETE ( routeLocal [ ("stream/:sid", deleteStreamHandler )
                                  , ("audio/:sid/:fid" , deleteSong)
                                  ] )
        <|> dir "static" (serveDirectory (dataDir <> "/static"))
-
 
 yandexHandler :: Web ()
 yandexHandler = do
     sid <- getParam "sid"
     maybe (errorWWW 400) codeRequest sid
     where 
-    codeRequest st = redirect $ "https://oauth.yandex.ru/authorize?response_type=code&client_id=" <> idYandex <> "&state=" <> st
+    codeRequest st = redirect $ "https://oauth.yandex.ru/authorize?response_type=token&client_id=" <> idYandex <> "&state=" <> st
 
 {-
  POST /token HTTP/1.1
@@ -73,35 +75,18 @@ grant_type=authorization_code&code=<code>&client_id=<client_id>&client_secret=<c
 -}
 yandexOauth :: Web ()
 yandexOauth = do
+    r <- getRequest
+    liftIO $ print $ SC.rqPathInfo r
+    liftIO $ print $ SC.rqQueryString r
+    liftIO $ print $ SC.rqContextPath r
+    token <- getParam "access_token"
+    tokenType <- getParam "token_type"
     st <- getParam "state"
-    cd <- getParam "code"
-    case (st, cd) of
-         (Just st', Just cd') -> getToken (fromStrict st') cd'
-         _ -> errorWWW 400
-    where
-    getToken sid tokenCode = do
-        let req = "grant_type=authorization_code&code=" 
-                <> tokenCode 
-                <> "&client_id=" 
-                <> idYandex 
-                <> "&client_secret=" 
-                <> passYandex
-            nvs = [ ("grant_type", "authorization_code")
-                  , ("code", tokenCode)
-                  , ("client_id", idYandex)
-                  , ("client_secret", passYandex)
-                  ]
-            reqSize = length $ unpack req
-        liftIO $ withOpenSSL $ do
-            ctx <- H.baselineContextSSL
-            c <- H.openConnectionSSL ctx oauthUrlYandex 443
-            q <- liftIO $ H.buildRequest $ do
-                H.http H.POST oauthPathYandex
-                H.setContentType "application/x-www-form-urlencoded"
-                H.setContentLength $ fromIntegral reqSize
-            _ <- H.sendRequest c q (H.encodedFormBody nvs)
-            H.receiveResponse c H.debugHandler
-        writeLBS $ "channel id " <> sid <> " code from yandex " <> fromStrict tokenCode
+    liftIO $ print token
+    liftIO $ print tokenType
+    liftIO $ print st
+        
+    
     
 
 statsHandler :: Web ()

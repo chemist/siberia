@@ -42,6 +42,10 @@ executable siberia
                        collections-api >=1.0.0, 
                        snap-server >=0.9.0, 
                        attoparsec >=0.10.0, 
+                       transformers >=0.3.0.0,
+                       HTTP >=4000.2.8,
+                       http-streams >=0.6.0.1,
+                       HsOpenSSL >=0.10.3.3,
                        aeson >=0.6.0, 
                        snap-core >=0.9.0, 
                        data-cycle >=0.1.0, 
@@ -50,4 +54,4 @@ executable siberia
                        blaze-builder >=0.3.0, 
                        binary >=0.5.0
   hs-source-dirs:      src
-  GHC-Options: -O2 -threaded  
+  GHC-Options: -O2 -threaded -debug
