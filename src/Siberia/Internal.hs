@@ -14,6 +14,7 @@ module Siberia.Internal (
   , connectWithAddMetaAndBuffering
   , saveClientPid
   , removeClientPid
+  , insertMeta
   ) where
 
 import           BasicPrelude                             hiding (FilePath, Map,
@@ -163,6 +164,38 @@ newtype Chunk = Chunk ByteString
 toChunks :: Int -> A.Parser (Maybe Chunk)
 toChunks metaInt = (A.endOfInput >> pure Nothing) <|> Just . Chunk <$> A.take metaInt
 
+insertMeta :: Maybe Int -> IO (Maybe Meta) -> InputStream ByteString -> IO (InputStream Builder)
+insertMeta Nothing _ is = S.map Builder.fromByteString is
+insertMeta (Just metaInt) getMeta is = do
+    chunked <- S.parserToInputStream (toChunks metaInt) is
+    metas   <- S.makeInputStream $ do
+        m <- getMeta
+        return $ Just $ maybe (Meta ("", 0)) id m
+    refMeta <- newIORef $ Just (Meta ("", 0))
+    withMeta <- S.zipWithM (fun refMeta) chunked metas
+    ref <- newIORef 0
+    return withMeta
+    where
+    fun:: IORef (Maybe Meta) -> Chunk -> Meta -> IO Builder
+    fun ref (Chunk bs) (Meta (meta', len)) = do
+        result <- atomicModifyIORef ref (check meta' len)
+        return $ Builder.fromByteString $ if result
+           then bs <> fromLen len <> meta'
+           else bs <> zero
+    check :: ByteString -> Int -> Maybe Meta -> (Maybe Meta, Bool)
+    check _ _ Nothing = (Nothing, False)
+    check bs nl (Just (Meta (m, l))) =
+      if bs == m
+         then (Just (Meta (m,l)), False)
+         else (Just (Meta (bs,nl)), True)
+
+    fromLen :: Int -> ByteString
+    fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16)
+
+    zero :: ByteString
+    zero = BS.pack [toEnum 0]
+    
+    
 -- | input >-< output and add meta info
 connectWithAddMetaAndBuffering :: Maybe Int       -- ^ meta int
                                ->  IO (Maybe Meta) -- ^ get meta info
