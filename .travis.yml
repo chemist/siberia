@@ -1,0 +1,5 @@
+language: haskell
+notification:
+    email: true
+script:
+    - cabal configure && cabal build
