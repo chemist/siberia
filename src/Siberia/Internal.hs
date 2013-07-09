@@ -79,11 +79,12 @@ load path = do
     return ()
 
 
+
 -- | create channel
 makeChannel::Radio -> Application ()
 makeChannel radio = do
     say "start make channel"
-    radioStreamInput <- try $ getStream radio :: Application (Either SomeException (InputStream ByteString))
+    radioStreamInput <- try $ agent radio :: Application (Either SomeException (InputStream ByteString))
     either whenError whenGood radioStreamInput
     where
       whenError x = do
@@ -251,12 +252,12 @@ outputStreamFromBuffer buf' = makeOutputStream f
 {-# INLINE outputStreamFromBuffer #-}
 
 -- | create stream
-getStream :: Radio -> Application (InputStream ByteString)
-getStream radio = getStream' =<< (getD radio :: Application Radio)
+agent :: Radio -> Application (InputStream ByteString)
+agent radio = agent' =<< (getD radio :: Application Radio)
   where
   -- for testing only
-  getStream' :: Radio -> Application (InputStream ByteString)
-  getStream' (ById (RadioId "/test")) = liftIO $ S.fromGenerator $ genStream fakeRadioStream'
+  agent' :: Radio -> Application (InputStream ByteString)
+  agent' (ById (RadioId "/test")) = liftIO $ S.fromGenerator $ genStream fakeRadioStream'
     where
       fakeRadioStream' :: [ByteString]
       fakeRadioStream' = BasicPrelude.map (\x -> (E.encodeUtf8 . show) x <> " ") [1.. ]
@@ -269,7 +270,7 @@ getStream radio = getStream' =<< (getD radio :: Application Radio)
           genStream stop
 
   -- proxy stream
-  getStream' radio@Proxy{} = do
+  agent' radio@Proxy{} = do
       (i, o) <- openConnection radio
       let Url url' = url radio
       let Right path = parseOnly parsePath url'
@@ -308,7 +309,7 @@ getStream radio = getStream' =<< (getD radio :: Application Radio)
                hints = defaultHints {addrFlags = [AI_ADDRCONFIG, AI_NUMERICSERV]}
 
   -- local stream
-  getStream' radio@Local{} = do
+  agent' radio@Local{} = do
       reader <- ask
       handleIO <- liftIO $ newIORef Nothing
       liftIO $ makeInputStream $ f reader handleIO

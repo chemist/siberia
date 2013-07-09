@@ -32,6 +32,9 @@ import           Data.Cycle
 import           Data.IORef
 import           Paths_siberia
 import           Snap.Core               (Snap)
+import           Data.Attoparsec.RFC2616      (Request (..), request)
+import System.IO.Streams (InputStream)
+import           Blaze.ByteString.Builder                 (Builder)
 
 -- | const paths
 tempDir, musicDirectory, logFile :: FilePath
@@ -50,6 +53,18 @@ newtype Meta = Meta (ByteString, Int) deriving (Show, Ord, Eq)
 type Headers = [Header]
 type HostPort = Maybe (HostName, Int)
 type Channel = Maybe (Chan (Maybe ByteString))
+     
+data SRequest = SRequest 
+  { headers' :: Headers
+  , request' :: Request
+  , radio   :: Radio
+  }           | BadRequest Int ByteString
+  deriving (Show, Eq) 
+  
+type SResponse = InputStream Builder 
+
+type ShoutCast = SRequest -> Application SResponse
+
 
 port :: Int
 port = 2000
