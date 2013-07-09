@@ -78,6 +78,78 @@ load path = do
     _ <- M.mapM_ create radio
     return ()
 
+makeAgent :: ShoutCast
+makeAgent SRequest{..} = makeAgent' =<< getD radio 
+
+makeAgent' :: Radio -> Application (InputStream Builder)
+makeAgent' radio = maybe notConnected haveChannel =<<  (getD radio :: Application Channel)
+    where
+    haveChannel chan = do
+        Just buf' <- getD radio :: Application (Maybe (Buffer ByteString))
+        duplicate <- liftIO $ dupChan chan
+        okResponse <- liftIO $ S.map Builder.fromByteString =<< S.fromByteString successRespo
+        (input, countOut) <- liftIO $ S.countInput =<< S.chanToInput duplicate
+        countIn <- getD radio :: Application (IO Int64)
+        -- killer here
+        birst <- liftIO $ S.fromByteString =<< getAll buf'
+        getMeta <- return <$> getD radio :: Application (IO (Maybe Meta))
+        withMeta <- liftIO $ insertMeta (Just 8192) getMeta =<< S.concatInputStreams [birst, input]
+        liftIO $ S.concatInputStreams [okResponse, withMeta]
+    notConnected = do
+        say "channel not connected, try create stream"
+        let tryConnect :: Int -> Application (InputStream ByteString, Bool)
+            tryConnect i | i < 3 = do 
+                inputS <- try $ agent radio :: Application (Either SomeException (InputStream ByteString))
+                case inputS of
+                     Left _ -> do
+                         setD radio (Nothing :: Maybe (Chan (Maybe ByteString)))
+                         liftIO $ threadDelay 1000000
+                         tryConnect (i + 1)
+                     Right iS -> return $! (iS, True)
+                         | otherwise = do
+                             iS <- liftIO $ S.fromByteString "ICY 423 Locked\r\n"
+                             return $! (iS, False)
+        (inputStream, isGood) <- tryConnect 3
+        if isGood 
+           then do
+               state <- ask
+               let saveMeta :: Maybe Meta -> IO ()
+                   saveMeta x = runReaderT (setD radio x) state
+               chan <- liftIO newChan
+               buf' <- liftIO $ new 20 :: Application (Buffer ByteString)
+               setD radio (Just buf')
+               metaInt <- unpackMeta <$> (lookupHeader "icy-metaint" <$> getD radio) :: Application (Maybe Int)
+               chanStreamOutput <- liftIO $ S.chanToOutput chan
+               (chanStreamInput, countInputBytes) <- liftIO $ S.countInput =<< S.chanToInput chan
+               setD radio countInputBytes
+               outputBuffer <- liftIO $ outputStreamFromBuffer buf'
+               (p1, p2) <- liftIO $ connectWithRemoveMetaAndBuffering metaInt saveMeta 8192 inputStream chanStreamOutput
+               p3 <- liftIO $ forkIO $ S.connect chanStreamInput outputBuffer
+               setD radio $ Status 0 (Just p1) (Just p2) (Just p3) []
+               setD radio (Just chan :: Maybe (Chan (Maybe ByteString)))
+               haveChannel chan
+           else liftIO $ S.map Builder.fromByteString inputStream
+        
+    
+unpackMeta :: [ByteString] -> Maybe Int
+unpackMeta meta' = do
+    m <- listToMaybe meta'
+    (a,_) <- C.readInt m
+    return a
+                   
+    
+successRespo :: ByteString
+successRespo = concat [ "ICY 200 OK\r\n"
+                      , "icy-notice1: Siberia shoutcast server\r\n"
+                      , "icy-notice2: Good music here\r\n"
+                      , "content-type: audio/mpeg\r\n"
+                      , "icy-name: Good music for avery one \r\n"
+                      , "icy-url: http://localhost:2000/big \r\n"
+                      , "icy-genre: Swing  Big Band  Jazz  Blues\r\n"
+                      , "icy-pub: 1\r\n"
+                      , "icy-metaint: 8192\n"
+                      , "icy-br: 128\r\n\r\n"
+                      ]
 
 
 -- | create channel
@@ -255,20 +327,7 @@ outputStreamFromBuffer buf' = makeOutputStream f
 agent :: Radio -> Application (InputStream ByteString)
 agent radio = agent' =<< (getD radio :: Application Radio)
   where
-  -- for testing only
   agent' :: Radio -> Application (InputStream ByteString)
-  agent' (ById (RadioId "/test")) = liftIO $ S.fromGenerator $ genStream fakeRadioStream'
-    where
-      fakeRadioStream' :: [ByteString]
-      fakeRadioStream' = BasicPrelude.map (\x -> (E.encodeUtf8 . show) x <> " ") [1.. ]
-
-      genStream :: [ByteString] -> S.Generator ByteString ()
-      genStream x = do
-          let (start, stop) = splitAt 1024 x
-          S.yield $ mconcat start
-          liftIO $ threadDelay 100000
-          genStream stop
-
   -- proxy stream
   agent' radio@Proxy{} = do
       (i, o) <- openConnection radio
