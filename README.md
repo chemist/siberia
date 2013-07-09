@@ -2,6 +2,8 @@ Siberia
 =======================
 Сервер для ретрансляции радио и вещания с локальных файлов. 
 
+[![Build Status](https://travis-ci.org/chemist/siberia.png?branch=master)](https://travis-ci.org/chemist/siberia)
+
 Сборка и запуск
 --------------
 
