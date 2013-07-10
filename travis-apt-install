@@ -2,10 +2,13 @@
 set -eu
 
 sudo apt-get -q update
-cabal install alex
-cabal install happy
+sudo apt-get -q -y install alex
+sudo apt-get -q -y install happy
+#cabal install alex
+#cabal install happy
 cabal install gtk2hs-buildtools
 sudo apt-get -q -y install pkg-config
 cabal install glib
 sudo apt-get -q -y install libtag1c2a
 sudo apt-get -q -y install libtag1-dev
+cabal install libtagc
