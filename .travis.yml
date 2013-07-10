@@ -1,5 +1,7 @@
 language: haskell
 notification:
     email: true
+before_install:
+    - cabal install --only-dependencies --force-reinstall
 script:
-    - cabal install --only-dependencies --force-reinstall && cabal configure && cabal build
+    - cabal configure && cabal build
