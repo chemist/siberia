@@ -2,7 +2,7 @@ language: haskell
 notification:
     email: true
 before_install:
-    - ./travis-apt-install
+    - sh travis-apt-install
     - cabal install --only-dependencies --force-reinstall
 script:
     - cabal configure && cabal build
