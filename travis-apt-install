@@ -11,4 +11,6 @@ sudo apt-get -q -y install pkg-config
 cabal install glib
 sudo apt-get -q -y install libtag1c2a
 sudo apt-get -q -y install libtag1-dev
+sudo apt-get -q -y install libtagc0
+sudo apt-get -q -y install libtagc0-dev
 cabal install libtagc
