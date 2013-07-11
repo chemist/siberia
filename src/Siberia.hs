@@ -86,16 +86,28 @@ main = do
     void . forever $ do
         (accepted, _) <- accept sock
         connected <- socketToStreams accepted
-        forkIO $ runReaderT (shoutHandler connected app  `finally`  (liftIO $ (say "close accepted" >> sClose accepted))) stateR
+        forkIO $ do
+            pid <- myThreadId
+            rmv <- newEmptyMVar
+            let cleanAll = do
+                liftIO $ say "close accepted"
+                liftIO $ sClose accepted
+                sreq <- liftIO $ readMVar rmv
+                case sreq of
+                     BadRequest{} -> return ()
+                     SRequest{..} -> removeClientPid pid radio
+            runReaderT (shoutHandler connected app rmv `finally`  cleanAll) stateR
     sClose sock
     return ()
  
-shoutHandler :: (InputStream ByteString, OutputStream ByteString) -> ShoutCast -> Application ()
-shoutHandler (is, os) app = do
-    input <- app =<< (liftIO . parseRequest $ is)
+shoutHandler :: (InputStream ByteString, OutputStream ByteString) -> ShoutCast -> MVar SRequest -> Application ()
+shoutHandler (is, os) app rmv = do
+    input <- app =<< (\x -> (liftIO $ putMVar rmv x) >> return x) =<< (liftIO . parseRequest $ is)
     builder <- liftIO $ S.builderStreamWith (allNewBuffersStrategy buffSize) os
     liftIO $ S.connect input builder
    
+buffSize = 32768
+
 parseRequest :: InputStream ByteString -> IO SRequest
 parseRequest is = do
     sized <- S.throwIfProducesMoreThan 2048 is
@@ -115,64 +127,5 @@ app sRequest = appIf =<< (member $ radio sRequest)
     where 
     appIf False = liftIO $ S.map B.fromByteString =<< S.fromByteString "ICY 404 Not Found\r\n"
     appIf True  = client sRequest
- 
-client :: ShoutCast
-client SRequest{..} = do
-    let wait :: Int -> Application ()
-        wait i 
-          | i < 3 = do
-              chan <- getD radio :: Application Channel
-              case chan of
-                   Just _ -> return ()
-                   Nothing -> makeChannel radio >> (liftIO $ threadDelay 1000000) >> wait (i + 1)
-          | otherwise = return ()
-    wait 0
-    chan' <- getD radio :: Application Channel 
-    maybe chanError chanGood chan'
-    where
-    chanError = liftIO $ S.map B.fromByteString =<< S.fromByteString "ICY 423 Locked\r\n"
-    chanGood chan'' = do
-        pid <- liftIO $ myThreadId
-        saveClientPid pid radio
-        Just buf' <- getD radio :: Application (Maybe (Buffer ByteString))
-        duplicate <- liftIO $ dupChan chan''
-        okResponse <- liftIO $ S.map B.fromByteString =<< S.fromByteString successRespo
-        (input, countOut) <- liftIO $ S.countInput =<< S.chanToInput duplicate
-        countIn <- getD radio :: Application (IO Int64)
-        liftIO $ forkIO $ do
-            -- @TODO must be killed
-            start <- newIORef =<< countIn
-            forever $ do
-                s <- readIORef start
-                cI <- countIn
-                cO <- countOut
-                when (((cI - s) - cO) > 300000) $ do
-                    say $ "slow client detected " ++ show pid ++ " diff " ++ (show ((cI -s) -cO))
-                    killThread pid
-                    liftIO $! getChanContents duplicate
-                    killThread =<< myThreadId 
-                    return ()
-                threadDelay 5000000
-        birst <- liftIO $ getAll buf'
-        birst' <- liftIO $ S.fromByteString birst
-        getMeta <- return <$> getD radio :: Application (IO (Maybe Meta))
-        withMeta <- liftIO $ insertMeta (Just 8192) getMeta =<<  S.concatInputStreams [birst', input]
-        liftIO $ S.concatInputStreams [okResponse, withMeta]
-        
-buffSize = 32768
-
-      
-       
-successRespo :: ByteString
-successRespo = concat [ "ICY 200 OK\r\n"
-                      , "icy-notice1: Siberia shoutcast server\r\n"
-                      , "icy-notice2: Good music here\r\n"
-                      , "content-type: audio/mpeg\r\n"
-                      , "icy-name: Good music for avery one \r\n"
-                      , "icy-url: http://localhost:2000/big \r\n"
-                      , "icy-genre: Swing  Big Band  Jazz  Blues\r\n"
-                      , "icy-pub: 1\r\n"
-                      , "icy-metaint: 8192\n"
-                      , "icy-br: 128\r\n\r\n"
-                      ]
+    
 

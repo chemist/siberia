@@ -6,7 +6,7 @@
 {-# LANGUAGE TypeSynonymInstances   #-}
 module Siberia.Internal (
   module Siberia.Data
-  , makeChannel
+  , client
   , load
   , save
   , say
@@ -78,19 +78,34 @@ load path = do
     _ <- M.mapM_ create radio
     return ()
 
-makeAgent :: ShoutCast
-makeAgent SRequest{..} = makeAgent' =<< getD radio 
+client :: ShoutCast
+client SRequest{..} = client' =<< getD radio 
 
-makeAgent' :: Radio -> Application (InputStream Builder)
-makeAgent' radio = maybe notConnected haveChannel =<<  (getD radio :: Application Channel)
+client' :: Radio -> Application (InputStream Builder)
+client' radio = maybe notConnected haveChannel =<<  (getD radio :: Application Channel)
     where
     haveChannel chan = do
+        pid <- liftIO myThreadId
+        saveClientPid pid radio
         Just buf' <- getD radio :: Application (Maybe (Buffer ByteString))
         duplicate <- liftIO $ dupChan chan
         okResponse <- liftIO $ S.map Builder.fromByteString =<< S.fromByteString successRespo
         (input, countOut) <- liftIO $ S.countInput =<< S.chanToInput duplicate
         countIn <- getD radio :: Application (IO Int64)
         -- killer here
+        liftIO $ forkIO $ do
+            start <- newIORef =<< countIn
+            forever $ do
+                s <- readIORef start
+                cI <- countIn
+                cO <- countOut
+                when (cI - cO - s > 300000) $ do
+                    say $ "slow client detected " ++ show pid ++ " diff " ++ (show (cI - cO - s))
+                    killThread pid
+                    void $! getChanContents duplicate
+                    killThread =<< myThreadId
+                    return ()
+                threadDelay 5000000
         birst <- liftIO $ S.fromByteString =<< getAll buf'
         getMeta <- return <$> getD radio :: Application (IO (Maybe Meta))
         withMeta <- liftIO $ insertMeta (Just 8192) getMeta =<< S.concatInputStreams [birst, input]
@@ -99,17 +114,19 @@ makeAgent' radio = maybe notConnected haveChannel =<<  (getD radio :: Applicatio
         say "channel not connected, try create stream"
         let tryConnect :: Int -> Application (InputStream ByteString, Bool)
             tryConnect i | i < 3 = do 
+                say "tryConnect"
                 inputS <- try $ agent radio :: Application (Either SomeException (InputStream ByteString))
                 case inputS of
                      Left _ -> do
                          setD radio (Nothing :: Maybe (Chan (Maybe ByteString)))
                          liftIO $ threadDelay 1000000
                          tryConnect (i + 1)
-                     Right iS -> return $! (iS, True)
+                     Right iS -> do
+                         return $! (iS, True)
                          | otherwise = do
                              iS <- liftIO $ S.fromByteString "ICY 423 Locked\r\n"
                              return $! (iS, False)
-        (inputStream, isGood) <- tryConnect 3
+        (inputStream, isGood) <- tryConnect 0
         if isGood 
            then do
                state <- ask
@@ -150,46 +167,6 @@ successRespo = concat [ "ICY 200 OK\r\n"
                       , "icy-metaint: 8192\n"
                       , "icy-br: 128\r\n\r\n"
                       ]
-
-
--- | create channel
-makeChannel::Radio -> Application ()
-makeChannel radio = do
-    say "start make channel"
-    radioStreamInput <- try $ agent radio :: Application (Either SomeException (InputStream ByteString))
-    either whenError whenGood radioStreamInput
-    where
-      whenError x = do
-          say $ "Error when connection: " ++ show x
-          setD radio (Nothing :: Maybe (Chan (Maybe ByteString)))
-      whenGood radioStreamInput' = do
-          say "start good"
-          stateR <- ask
-          let saveMeta :: Maybe Meta -> IO ()
-              saveMeta x = runReaderT (setD radio x) stateR
-          chan <- liftIO newChan
-          buf' <- liftIO $ new 20 :: Application (Buffer ByteString)
-          setD radio (Just buf')
-          metaInt <- unpackMeta <$> (lookupHeader "icy-metaint" <$> getD radio) :: Application (Maybe Int)
-          say "have meta int"
-          say $ show metaInt
-          chanStreamOutput <- liftIO $ S.chanToOutput chan
-          (chanStreamInput, countInputBytes)  <- liftIO $ S.countInput =<< S.chanToInput  chan
-          setD radio countInputBytes
-          outputBuffer <- liftIO $ outputStreamFromBuffer buf'
-          say "have output buffer"
-          (p1,p2) <- liftIO $ connectWithRemoveMetaAndBuffering metaInt saveMeta 8192 radioStreamInput' chanStreamOutput
-          p3 <-  liftIO $ forkIO $ S.connect chanStreamInput outputBuffer
-          setD radio $ Status 0 (Just p1) (Just p2) (Just p3) []
-          setD radio (Just chan :: Maybe (Chan (Maybe ByteString)))
-          say "finish output buffer"
-          --  TODO save pid
-          return ()
-      unpackMeta :: [ByteString] -> Maybe Int
-      unpackMeta meta' = do
-          m <- listToMaybe meta'
-          (a,_) <- C.readInt m
-          return a
 
 -- | Parse stream, remove meta info from stream, bufferize, save meta info in state
 connectWithRemoveMetaAndBuffering ::Maybe Int                -- ^meta int
@@ -330,6 +307,7 @@ agent radio = agent' =<< (getD radio :: Application Radio)
   agent' :: Radio -> Application (InputStream ByteString)
   -- proxy stream
   agent' radio@Proxy{} = do
+      say "make proxy stream"
       (i, o) <- openConnection radio
       let Url url' = url radio
       let Right path = parseOnly parsePath url'
@@ -345,7 +323,6 @@ agent radio = agent' =<< (getD radio :: Application Radio)
       setD radio headers'
       say $ show response'
       say $ show headers'
-      say "makeConnect end"
       return i
       where
         -- | открываем соединение до стрим сервера
@@ -369,6 +346,7 @@ agent radio = agent' =<< (getD radio :: Application Radio)
 
   -- local stream
   agent' radio@Local{} = do
+      say "make local stream"
       reader <- ask
       handleIO <- liftIO $ newIORef Nothing
       liftIO $ makeInputStream $ f reader handleIO
@@ -408,25 +386,6 @@ agent radio = agent' =<< (getD radio :: Application Radio)
 
 -- buffer size
 bUFSIZ = 32752
-
--- const ffmpeg
-command :: String
-command = "ffmpeg -re -i - -f mp3 -acodec copy -"
-
--- | create InputStream from file
-runFFmpeg ::String ->  IO (S.InputStream BS.ByteString)
-runFFmpeg filename = do
-    (i, o, e, ph ) <- S.runInteractiveCommand command
-    forkIO $ do nullOutput <- S.nullOutput
-                S.withFileAsInput filename (fun i)
-                S.connect e nullOutput
-                exitCode <- P.waitForProcess ph
-                say $ show exitCode
-                say "next song"
-    return o
-    where fun :: S.OutputStream BS.ByteString -> S.InputStream BS.ByteString -> IO ()
-          fun os is = S.connect is os
-
 kill :: MProcess -> IO ()
 kill (Just x) = killThread x
 kill Nothing = return ()
@@ -457,15 +416,19 @@ removeClientPid t mv = removePid =<< info mv
             newStatus = oldStatus { connections = newConnections
                                   , connectionsProcesses = newConnectionsProcesses
                                   }
-        liftIO $ forkIO $ case (r, newConnections == 0) of
+        isLast <- liftIO $ case (r, newConnections == 0) of
              (Proxy{..}, True) -> do
                  say "last user go away"
                  say "kill proxy radio channel"
                  kill $ connectProcess oldStatus
                  kill $ chanProcess oldStatus
                  kill $ bufferProcess oldStatus
-             _ -> return ()
-        return $ r { pid = newStatus }
+                 return True
+             _ -> return False
+        return $ if isLast 
+                    then r { pid = newStatus, channel = Nothing, buff = Nothing }
+                    else r { pid = newStatus }
+           
 
 instance Monoid a => RadioBuffer Buffer a where
     new n = do
