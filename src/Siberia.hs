@@ -1,59 +1,63 @@
 -- | Simple shoutcast server for streaming audio broadcast.
 
-{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards   #-}
 
-module Main (
-main
+module Main ( main
 ) where
 
-import           BasicPrelude                 hiding (FilePath, appendFile,
-                                               concat, length, splitAt)
+import           BasicPrelude                             hiding (FilePath,
+                                                           appendFile, concat,
+                                                           length, splitAt)
 import qualified Prelude
 
-import           Control.Concurrent           (ThreadId, forkIO, killThread,
-                                               myThreadId, newMVar, threadDelay)
-import           Control.Concurrent.Chan      (dupChan, getChanContents)
+import           Control.Concurrent                       (ThreadId, forkIO,
+                                                           killThread,
+                                                           myThreadId, newMVar,
+                                                           threadDelay)
+import           Control.Concurrent.Chan                  (dupChan,
+                                                           getChanContents)
 
-import           Data.ByteString              (concat, length)
+import           Data.ByteString                          (concat, length)
 
-import qualified Data.Map                     as Map
+import qualified Data.Map                                 as Map
 
-import           Network.BSD                  (getHostName)
-import           Network.Socket               (Family (AF_INET),
-                                               SockAddr (SockAddrInet), Socket,
-                                               SocketOption (ReuseAddr),
-                                               SocketType (Stream), accept,
-                                               bindSocket, defaultProtocol,
-                                               listen, sClose, setSocketOption,
-                                               socket)
-import           System.IO.Streams            as S
-import           System.IO.Streams.Attoparsec as S
-import           System.IO.Streams.Concurrent as S
+import           Network.BSD                              (getHostName)
+import           Network.Socket                           (Family (AF_INET), SockAddr (SockAddrInet),
+                                                           Socket, SocketOption (ReuseAddr),
+                                                           SocketType (Stream),
+                                                           accept, bindSocket,
+                                                           defaultProtocol,
+                                                           listen, sClose,
+                                                           setSocketOption,
+                                                           socket)
+import           System.IO.Streams                        as S
+import           System.IO.Streams.Attoparsec             as S
+import           System.IO.Streams.Concurrent             as S
 
-import           Data.Attoparsec.RFC2616      (Request (..), request)
+import           Data.Attoparsec.RFC2616                  (Request (..),
+                                                           request)
 
 import           Control.Monad.Reader
-import qualified Control.Monad.State          as ST
-import qualified Data.Collections             as Collections
-import           Data.Text.IO                 (appendFile)
+import qualified Control.Monad.State                      as ST
+import qualified Data.Collections                         as Collections
+import           Data.Text.IO                             (appendFile)
 import           Paths_siberia
 import           Siberia.Internal
-import           Siberia.Web                  (web)
-import           Snap.Http.Server             (quickHttpServe)
+import           Siberia.Web                              (web)
+import           Snap.Http.Server                         (quickHttpServe)
 import           System.Directory
 
 
-import           Control.Concurrent.MVar
-import qualified Data.ByteString.Char8        as C
-import           Data.IORef
-import qualified Network.Socket.ByteString    as N
-import           System.Mem
 import           Blaze.ByteString.Builder                 (Builder)
 import qualified Blaze.ByteString.Builder                 as Builder
+import qualified Blaze.ByteString.Builder                 as B (fromByteString)
 import           Blaze.ByteString.Builder.Internal.Buffer (allNewBuffersStrategy)
-import qualified Blaze.ByteString.Builder  as B (fromByteString)
+import           Control.Concurrent.MVar
+import qualified Data.ByteString.Char8                    as C
+import           Data.IORef
+import qualified Network.Socket.ByteString                as N
+import           System.Mem
 
 
 -- | const directory with music files
@@ -99,13 +103,13 @@ main = do
             runReaderT (shoutHandler connected app rmv `finally`  cleanAll) stateR
     sClose sock
     return ()
- 
+
 shoutHandler :: (InputStream ByteString, OutputStream ByteString) -> ShoutCast -> MVar SRequest -> Application ()
 shoutHandler (is, os) app rmv = do
     input <- app =<< (\x -> (liftIO $ putMVar rmv x) >> return x) =<< (liftIO . parseRequest $ is)
     builder <- liftIO $ S.builderStreamWith (allNewBuffersStrategy buffSize) os
     liftIO $ S.connect input builder
-   
+
 buffSize = 32768
 
 parseRequest :: InputStream ByteString -> IO SRequest
@@ -120,12 +124,12 @@ parseRequest is = do
        | showType s == "TooManyBytesReadException" = BadRequest 414 "ICY 414 Request-URI Too Long\r\n"
        | otherwise                                = BadRequest 400 "ICY 400 Bad Request\r\n"
     good (req, h) = SRequest h req (ById (RadioId $ requestUri req))
-      
+
 app :: ShoutCast
 app (BadRequest _ mes) = liftIO $ S.map B.fromByteString =<< S.fromByteString mes
 app sRequest = appIf =<< (member $ radio sRequest)
-    where 
+    where
     appIf False = liftIO $ S.map B.fromByteString =<< S.fromByteString "ICY 404 Not Found\r\n"
     appIf True  = client sRequest
-    
+
 

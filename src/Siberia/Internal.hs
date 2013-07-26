@@ -11,7 +11,6 @@ module Siberia.Internal (
   , save
   , say
   , connectWithRemoveMetaAndBuffering
-  , connectWithAddMetaAndBuffering
   , saveClientPid
   , removeClientPid
   , insertMeta
@@ -177,7 +176,7 @@ connectWithRemoveMetaAndBuffering ::Maybe Int                -- ^meta int
                                   -> IO (ThreadId, ThreadId)  -- ^return pids
 connectWithRemoveMetaAndBuffering Nothing _ buffSize is os = do
     builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
-    ps <- S.parserToInputStream toBuilder is
+    ps <- S.parserToInputStream (toBuilder defChunk) is
     x <- forkIO $ S.connect ps builder
     return (x,x)
 
@@ -192,8 +191,8 @@ connectWithRemoveMetaAndBuffering (Just metaInt) saveMeta buffSize is os = do
 {-# INLINE connectWithRemoveMetaAndBuffering #-}
 
 -- | builder parser
-toBuilder :: A.Parser (Maybe Builder)
-toBuilder = (A.endOfInput >> pure Nothing) <|> Just . Builder.fromByteString <$> A.take 32752
+toBuilder :: Int -> A.Parser (Maybe Builder)
+toBuilder i = (A.endOfInput >> pure Nothing) <|> Just . Builder.fromByteString <$> A.take i
 
 -- | meta info parser
 metaParser :: Int -> A.Parser (Maybe (Builder, Meta))
@@ -208,16 +207,10 @@ toLen :: ByteString -> Int
 toLen x = let [w] = BS.unpack x
           in 16 * fromIntegral w
 
-newtype Chunk = Chunk ByteString
-
--- | chunk parser
-toChunks :: Int -> A.Parser (Maybe Chunk)
-toChunks metaInt = (A.endOfInput >> pure Nothing) <|> Just . Chunk <$> A.take metaInt
-
 insertMeta :: Maybe Int -> IO (Maybe Meta) -> InputStream ByteString -> IO (InputStream Builder)
 insertMeta Nothing _ is = S.map Builder.fromByteString is
 insertMeta (Just metaInt) getMeta is = do
-    chunked <- S.parserToInputStream (toChunks metaInt) is
+    chunked <- S.parserToInputStream (toBuilder metaInt) is
     metas   <- S.makeInputStream $ do
         m <- getMeta
         return $ Just $ maybe (Meta ("", 0)) id m
@@ -226,11 +219,11 @@ insertMeta (Just metaInt) getMeta is = do
     ref <- newIORef 0
     return withMeta
     where
-    fun:: IORef (Maybe Meta) -> Chunk -> Meta -> IO Builder
-    fun ref (Chunk bs) (Meta (meta', len)) = do
+    fun:: IORef (Maybe Meta) -> Builder -> Meta -> IO Builder
+    fun ref bs (Meta (meta', len)) = do
         result <- atomicModifyIORef ref (check meta' len)
-        return $ Builder.fromByteString $ if result
-           then bs <> fromLen len <> meta'
+        return $ if result
+           then bs <> fromLen len <> Builder.fromByteString meta'
            else bs <> zero
     check :: ByteString -> Int -> Maybe Meta -> (Maybe Meta, Bool)
     check _ _ Nothing = (Nothing, False)
@@ -239,59 +232,12 @@ insertMeta (Just metaInt) getMeta is = do
          then (Just (Meta (m,l)), False)
          else (Just (Meta (bs,nl)), True)
 
-    fromLen :: Int -> ByteString
-    fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16)
+    fromLen :: Int -> Builder
+    fromLen x = (Builder.fromWord8 . fromIntegral) $ truncate $ (fromIntegral x / 16)
 
-    zero :: ByteString
-    zero = BS.pack [toEnum 0]
+    zero :: Builder
+    zero = Builder.fromWord8 $ toEnum 0
     
-    
--- | input >-< output and add meta info
-connectWithAddMetaAndBuffering :: Maybe Int       -- ^ meta int
-                               ->  IO (Maybe Meta) -- ^ get meta info
-                               ->  Int             -- ^ buffer size
-                               ->  InputStream ByteString -- ^ input stream
-                               ->  OutputStream ByteString -- ^ output stream
-                               ->  IO ()
-connectWithAddMetaAndBuffering Nothing _ buffSize is os = do
-    builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
-    ps <- S.parserToInputStream toBuilder is
-    S.connect ps builder
-
-connectWithAddMetaAndBuffering (Just metaInt) getMeta buffSize is os = do
-    builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
-    chunked <- S.parserToInputStream (toChunks metaInt) is
-    metas   <- S.makeInputStream $ do
-        m <- getMeta
-        return $ Just $ maybe (Meta ("", 0)) id m
-    refMeta <- newIORef $ Just (Meta ("", 0))
-    withMeta <- S.zipWithM (fun refMeta) chunked metas
-    ref <- newIORef 0
-    S.connect withMeta builder
-    where
-    fun:: IORef (Maybe Meta) -> Chunk -> Meta -> IO Builder
-    fun ref (Chunk bs) (Meta (meta', len)) = do
-        result <- atomicModifyIORef ref (check meta' len)
-        return $ Builder.fromByteString $ if result
-           then bs <> fromLen len <> meta'
-           else bs <> zero
-
-    check :: ByteString -> Int -> Maybe Meta -> (Maybe Meta, Bool)
-    check _ _ Nothing = (Nothing, False)
-    check bs nl (Just (Meta (m, l))) =
-      if bs == m
-         then (Just (Meta (m,l)), False)
-         else (Just (Meta (bs,nl)), True)
-
-    fromLen :: Int -> ByteString
-    fromLen x = (BS.singleton . fromIntegral) $ truncate $ (fromIntegral x / 16)
-
-    zero :: ByteString
-    zero = BS.pack [toEnum 0]
-
-{-# INLINE connectWithAddMetaAndBuffering #-}
-
-
 -- | make stream from buffer
 outputStreamFromBuffer :: Buffer ByteString -> IO (OutputStream ByteString)
 outputStreamFromBuffer buf' = makeOutputStream f
@@ -385,7 +331,7 @@ agent radio = agent' =<< (getD radio :: Application Radio)
                               f reader channelIO
 
 -- buffer size
-bUFSIZ = 32752
+defChunk = 32768
 kill :: MProcess -> IO ()
 kill (Just x) = killThread x
 kill Nothing = return ()
