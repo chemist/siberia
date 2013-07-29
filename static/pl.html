@@ -5,11 +5,12 @@
   <!-- <script src="/static/js/zepto.min.js"></script> -->
   <script src="/static/js/jplayer/jquery.jplayer.min.js"></script>
   <script type="text/javascript">
+    var stream = "http://" + document.location.hostname + ":2000/3578";
     $(document).ready(function(){
        $("#jquery_jplayer_1").jPlayer({
          ready: function () {
            $(this).jPlayer("setMedia", {
-             m4a: "http://192.168.1.46:2000/3578"
+             m4a: stream
            });
          },
          swfPath: "/js",
