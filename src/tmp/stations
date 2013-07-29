@@ -1,80 +1,80 @@
-{ "id" : "3577", "url" : { "uri" : "http://2293.live.streamtheworld.com:443/KMZTFM_SC" }}
-{ "id" : "3578", "url" : { "uri" : "http://2293.live.streamtheworld.com/KMZTFM_SC" }}
-{ "id" : "3579", "url" : { "uri" : "http://2293.live.streamtheworld.com:3690/KMZTFM_SC" }}
-{ "id" : "3604", "url" : { "uri" : "http://193.206.74.236:8000/listen" }}
-{ "id" : "3600", "url" : { "uri" : "http://198.105.220.12:6443/Live" }}
-{ "id" : "3601", "url" : { "uri" : "http://50.117.8.242:4626/Live" }}
-{ "id" : "3614", "url" : { "uri" : "http://www.radiocampus.org:8000/campus-bordeaux" }}
-{ "id" : "3611", "url" : { "uri" : "http://www.radiocampusangers.com:8000/rca" }}
-{ "id" : "3613", "url" : { "uri" : "http://stream.laut.fm/rockcorner" }}
-{ "id" : "3616", "url" : { "uri" : "http://stream.laut.fm/kriola" }}
-{ "id" : "3640", "url" : { "uri" : "http://stream.laut.fm/ganymed" }}
-{ "id" : "3618", "url" : { "uri" : "http://frequence.u-bourgogne.fr:8082/dijoncampus" }}
-{ "id" : "3622", "url" : { "uri" : "http://live.radiocampus.org:8000/mulhouse" }}
-{ "id" : "3643", "url" : { "uri" : "http://stream.laut.fm/uselinks" }}
-{ "id" : "3620", "url" : { "uri" : "http://live.campusgrenoble.org:9000/rcg112" }}
-{ "id" : "3619", "url" : { "uri" : "http://stream15.top-ix.org/radio6023" }}
-{ "id" : "3650", "url" : { "uri" : "http://stream15.top-ix.org/joetvannellidjradio" }}
-{ "id" : "8647", "url" : { "uri" : "http://listen.radionomy.com/kifcool" }}
-{ "id" : "3628", "url" : { "uri" : "http://sc7.lga.llnw.net/stream/radmarg_razorback" }}
-{ "id" : "3670", "url" : { "uri" : "http://stream.laut.fm/sunrise" }}
-{ "id" : "3639", "url" : { "uri" : "http://live.canstream.co.uk:8000/radiochristmas.mp3" }}
-{ "id" : "3671", "url" : { "uri" : "http://stream.laut.fm/mnmltech" }}
-{ "id" : "3658", "url" : { "uri" : "http://listen.radiosonar.co.uk:8000/streamhi.mp3" }}
-{ "id" : "3660", "url" : { "uri" : "http://worship.lobpreisradio.de:8000/anbetung-lobpreis-radio-32k-mp3-mono" }}
-{ "id" : "3646", "url" : { "uri" : "http://rfclive.uncc.edu:8000/listen" }}
-{ "id" : "3655", "url" : { "uri" : "http://karelmasters.com:8000/radiokarelia" }}
-{ "id" : "3684", "url" : { "uri" : "http://173.192.224.123:8567/stream" }}
-{ "id" : "3693", "url" : { "uri" : "http://94.23.1.51:8000/http:/ns364977.ovh.net:8000/ayeko.mp3" }}
-{ "id" : "3668", "url" : { "uri" : "http://krui.student-services.uiowa.edu:8000/listen" }}
-{ "id" : "3673", "url" : { "uri" : "http://3463.live.streamtheworld.com:443/WPAWFM_SC" }}
-{ "id" : "3686", "url" : { "uri" : "http://broadcast.infomaniak.net/stardance" }}
-{ "id" : "3674", "url" : { "uri" : "http://3463.live.streamtheworld.com:3690/WPAWFM_SC" }}
-{ "id" : "3704", "url" : { "uri" : "http://stream.laut.fm/alternativeworld" }}
-{ "id" : "3705", "url" : { "uri" : "http://86.26.2.40:8000/test5.aac" }}
-{ "id" : "3687", "url" : { "uri" : "http://152.18.67.230:8000/music" }}
-{ "id" : "3707", "url" : { "uri" : "http://173.192.48.97:8218/stream" }}
-{ "id" : "3715", "url" : { "uri" : "http://stream.laut.fm/laserbeat-fm" }}
-{ "id" : "3716", "url" : { "uri" : "http://stream.laut.fm/smorgasbord" }}
-{ "id" : "3678", "url" : { "uri" : "http://ss1.metrong.net:8000/smoothlivefm128" }}
-{ "id" : "3685", "url" : { "uri" : "http://broadcast.infomaniak.net/onefm-high.mp3" }}
-{ "id" : "3714", "url" : { "uri" : "http://142.150.7.99:8000/listen" }}
-{ "id" : "3675", "url" : { "uri" : "http://3463.live.streamtheworld.com/WPAWFM_SC" }}
-{ "id" : "3700", "url" : { "uri" : "http://streaming.kser.org:8000/kser.mp3" }}
-{ "id" : "3731", "url" : { "uri" : "http://broadcast.infomaniak.net/capitalfm-high.mp3" }}
-{ "id" : "3726", "url" : { "uri" : "http://www.urbannoize.com:8000/urbannoize" }}
-{ "id" : "3713", "url" : { "uri" : "http://listen.radionomy.com/AstraMixx" }}
-{ "id" : "3728", "url" : { "uri" : "http://ice.somafm.com/covers" }}
-{ "id" : "3741", "url" : { "uri" : "http://marconi.emerson.edu/wershd2" }}
-{ "id" : "3748", "url" : { "uri" : "http://ice01.gcnlive.com/home-hi.mp3" }}
-{ "id" : "3773", "url" : { "uri" : "http://stream.laut.fm/arvy-fm" }}
-{ "id" : "3764", "url" : { "uri" : "http://155.42.90.13:8002/wvtc_128" }}
-{ "id" : "3754", "url" : { "uri" : "http://li555-10.members.linode.com:8022/live" }}
-{ "id" : "3776", "url" : { "uri" : "http://207.200.96.226:8018/;stream.mp3" }}
-{ "id" : "3758", "url" : { "uri" : "http://stream.wmnf.org:8000/wmnf_high_quality" }}
-{ "id" : "3740", "url" : { "uri" : "http://marconi.emerson.edu/wers" }}
-{ "id" : "3765", "url" : { "uri" : "http://broadcast.infomaniak.net/globullwebradiosoft-128.mp3" }}
-{ "id" : "3768", "url" : { "uri" : "http://195.27.154.159/7/199/148613/v1/00.akacast.akamaistream.net/00-hoy-128" }}
-{ "id" : "3784", "url" : { "uri" : "http://ice.somafm.com/doomed" }}
-{ "id" : "3791", "url" : { "uri" : "http://198.154.106.102:8267/live" }}
-{ "id" : "3755", "url" : { "uri" : "http://mp3radio.lds.org/mormon" }}
-{ "id" : "3788", "url" : { "uri" : "http://216.246.74.188/patriots-live03" }}
-{ "id" : "3781", "url" : { "uri" : "http://delicious.wavestreamer.com:9901/Live" }}
-{ "id" : "3786", "url" : { "uri" : "http://mekradio.mekstream.com/rderadio" }}
-{ "id" : "3785", "url" : { "uri" : "http://stream.wrct.org:8000/wrct-hi.mp3" }}
-{ "id" : "3797", "url" : { "uri" : "http://50.7.243.50:8020/stream" }}
-{ "id" : "3767", "url" : { "uri" : "http://00-hoy-128.ng.akacast.akamaistream.net/7/199/148613/v1/00.akacast.akamaistream.net/00-hoy-128" }}
-{ "id" : "3796", "url" : { "uri" : "http://eclipse.galaxywebsolutions.com:7400/stream" }}
-{ "id" : "3803", "url" : { "uri" : "http://mediai1.gpb.org/live" }}
-{ "id" : "3806", "url" : { "uri" : "http://amber.streamguys.com:5550/kdnw" }}
-{ "id" : "3814", "url" : { "uri" : "http://tunein01.t4e.dj/main/dsl/mp3" }}
-{ "id" : "3822", "url" : { "uri" : "http://www.dnbnoize.com:8000/dnbnoize" }}
-{ "id" : "3820", "url" : { "uri" : "http://audio1.cruzio.com:8000/live128" }}
-{ "id" : "3816", "url" : { "uri" : "http://streaming.azpm.org/kuat192.mp3" }}
-{ "id" : "3826", "url" : { "uri" : "http://streaming.azpm.org/kuaz192.mp3" }}
-{ "id" : "3831", "url" : { "uri" : "http://supradio.net:8000/sup_high" }}
-{ "id" : "3839", "url" : { "uri" : "http://start-witfm.ice.infomaniak.ch/start-witfm-high" }}
-{ "id" : "3840", "url" : { "uri" : "http://216.104.37.26:8312/live" }}
-{ "id" : "3763", "url" : { "uri" : "http://listen.radionomy.com/cosmic-christmas-2012" }}
-{ "id" : "3848", "url" : { "uri" : "http://1.ice1.firststreaming.com:8000/kkjz_fm.mp3" }}
-{ "id" : "3842", "url" : { "uri" : "http://live.kboo.fm:8000/high" }}
+{ "id" : "3577", "url" : "http://2293.live.streamtheworld.com:443/KMZTFM_SC" }
+{ "id" : "3578", "url" : "http://2293.live.streamtheworld.com/KMZTFM_SC" }
+{ "id" : "3579", "url" : "http://2293.live.streamtheworld.com:3690/KMZTFM_SC" }
+{ "id" : "3604", "url" : "http://193.206.74.236:8000/listen" }
+{ "id" : "3600", "url" : "http://198.105.220.12:6443/Live" }
+{ "id" : "3601", "url" : "http://50.117.8.242:4626/Live" }
+{ "id" : "3614", "url" : "http://www.radiocampus.org:8000/campus-bordeaux" }
+{ "id" : "3611", "url" : "http://www.radiocampusangers.com:8000/rca" }
+{ "id" : "3613", "url" : "http://stream.laut.fm/rockcorner" }
+{ "id" : "3616", "url" : "http://stream.laut.fm/kriola" }
+{ "id" : "3640", "url" : "http://stream.laut.fm/ganymed" }
+{ "id" : "3618", "url" : "http://frequence.u-bourgogne.fr:8082/dijoncampus" }
+{ "id" : "3622", "url" : "http://live.radiocampus.org:8000/mulhouse" }
+{ "id" : "3643", "url" : "http://stream.laut.fm/uselinks" }
+{ "id" : "3620", "url" : "http://live.campusgrenoble.org:9000/rcg112" }
+{ "id" : "3619", "url" : "http://stream15.top-ix.org/radio6023" }
+{ "id" : "3650", "url" : "http://stream15.top-ix.org/joetvannellidjradio" }
+{ "id" : "8647", "url" : "http://listen.radionomy.com/kifcool" }
+{ "id" : "3628", "url" : "http://sc7.lga.llnw.net/stream/radmarg_razorback" }
+{ "id" : "3670", "url" : "http://stream.laut.fm/sunrise" }
+{ "id" : "3639", "url" : "http://live.canstream.co.uk:8000/radiochristmas.mp3" }
+{ "id" : "3671", "url" : "http://stream.laut.fm/mnmltech" }
+{ "id" : "3658", "url" : "http://listen.radiosonar.co.uk:8000/streamhi.mp3" }
+{ "id" : "3660", "url" : "http://worship.lobpreisradio.de:8000/anbetung-lobpreis-radio-32k-mp3-mono" }
+{ "id" : "3646", "url" : "http://rfclive.uncc.edu:8000/listen" }
+{ "id" : "3655", "url" : "http://karelmasters.com:8000/radiokarelia" }
+{ "id" : "3684", "url" : "http://173.192.224.123:8567/stream" }
+{ "id" : "3693", "url" : "http://94.23.1.51:8000/http:/ns364977.ovh.net:8000/ayeko.mp3" }
+{ "id" : "3668", "url" : "http://krui.student-services.uiowa.edu:8000/listen" }
+{ "id" : "3673", "url" : "http://3463.live.streamtheworld.com:443/WPAWFM_SC" }
+{ "id" : "3686", "url" : "http://broadcast.infomaniak.net/stardance" }
+{ "id" : "3674", "url" : "http://3463.live.streamtheworld.com:3690/WPAWFM_SC" }
+{ "id" : "3704", "url" : "http://stream.laut.fm/alternativeworld" }
+{ "id" : "3705", "url" : "http://86.26.2.40:8000/test5.aac" }
+{ "id" : "3687", "url" : "http://152.18.67.230:8000/music" }
+{ "id" : "3707", "url" : "http://173.192.48.97:8218/stream" }
+{ "id" : "3715", "url" : "http://stream.laut.fm/laserbeat-fm" }
+{ "id" : "3716", "url" : "http://stream.laut.fm/smorgasbord" }
+{ "id" : "3678", "url" : "http://ss1.metrong.net:8000/smoothlivefm128" }
+{ "id" : "3685", "url" : "http://broadcast.infomaniak.net/onefm-high.mp3" }
+{ "id" : "3714", "url" : "http://142.150.7.99:8000/listen" }
+{ "id" : "3675", "url" : "http://3463.live.streamtheworld.com/WPAWFM_SC" }
+{ "id" : "3700", "url" : "http://streaming.kser.org:8000/kser.mp3" }
+{ "id" : "3731", "url" : "http://broadcast.infomaniak.net/capitalfm-high.mp3" }
+{ "id" : "3726", "url" : "http://www.urbannoize.com:8000/urbannoize" }
+{ "id" : "3713", "url" : "http://listen.radionomy.com/AstraMixx" }
+{ "id" : "3728", "url" : "http://ice.somafm.com/covers" }
+{ "id" : "3741", "url" : "http://marconi.emerson.edu/wershd2" }
+{ "id" : "3748", "url" : "http://ice01.gcnlive.com/home-hi.mp3" }
+{ "id" : "3773", "url" : "http://stream.laut.fm/arvy-fm" }
+{ "id" : "3764", "url" : "http://155.42.90.13:8002/wvtc_128" }
+{ "id" : "3754", "url" : "http://li555-10.members.linode.com:8022/live" }
+{ "id" : "3776", "url" : "http://207.200.96.226:8018/;stream.mp3" }
+{ "id" : "3758", "url" : "http://stream.wmnf.org:8000/wmnf_high_quality" }
+{ "id" : "3740", "url" : "http://marconi.emerson.edu/wers" }
+{ "id" : "3765", "url" : "http://broadcast.infomaniak.net/globullwebradiosoft-128.mp3" }
+{ "id" : "3768", "url" : "http://195.27.154.159/7/199/148613/v1/00.akacast.akamaistream.net/00-hoy-128" }
+{ "id" : "3784", "url" : "http://ice.somafm.com/doomed" }
+{ "id" : "3791", "url" : "http://198.154.106.102:8267/live" }
+{ "id" : "3755", "url" : "http://mp3radio.lds.org/mormon" }
+{ "id" : "3788", "url" : "http://216.246.74.188/patriots-live03" }
+{ "id" : "3781", "url" : "http://delicious.wavestreamer.com:9901/Live" }
+{ "id" : "3786", "url" : "http://mekradio.mekstream.com/rderadio" }
+{ "id" : "3785", "url" : "http://stream.wrct.org:8000/wrct-hi.mp3" }
+{ "id" : "3797", "url" : "http://50.7.243.50:8020/stream" }
+{ "id" : "3767", "url" : "http://00-hoy-128.ng.akacast.akamaistream.net/7/199/148613/v1/00.akacast.akamaistream.net/00-hoy-128" }
+{ "id" : "3796", "url" : "http://eclipse.galaxywebsolutions.com:7400/stream" }
+{ "id" : "3803", "url" : "http://mediai1.gpb.org/live" }
+{ "id" : "3806", "url" : "http://amber.streamguys.com:5550/kdnw" }
+{ "id" : "3814", "url" : "http://tunein01.t4e.dj/main/dsl/mp3" }
+{ "id" : "3822", "url" : "http://www.dnbnoize.com:8000/dnbnoize" }
+{ "id" : "3820", "url" : "http://audio1.cruzio.com:8000/live128" }
+{ "id" : "3816", "url" : "http://streaming.azpm.org/kuat192.mp3" }
+{ "id" : "3826", "url" : "http://streaming.azpm.org/kuaz192.mp3" }
+{ "id" : "3831", "url" : "http://supradio.net:8000/sup_high" }
+{ "id" : "3839", "url" : "http://start-witfm.ice.infomaniak.ch/start-witfm-high" }
+{ "id" : "3840", "url" : "http://216.104.37.26:8312/live" }
+{ "id" : "3763", "url" : "http://listen.radionomy.com/cosmic-christmas-2012" }
+{ "id" : "3848", "url" : "http://1.ice1.firststreaming.com:8000/kkjz_fm.mp3" }
+{ "id" : "3842", "url" : "http://live.kboo.fm:8000/high" }

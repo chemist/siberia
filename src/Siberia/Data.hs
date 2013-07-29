@@ -184,8 +184,8 @@ tlocal = "local"
 
 instance ToJSON Radio where
     toJSON x@Proxy{} = object [ "id" .= (toJSON . rid) x
-                              , "url" .= (toJSON . url) x
-                              , "listenUrl" .= (toJSON . concat) ["http://", pack host', ":", toBs port', "/", (fromRid . rid) x]
+                              , "url" .= (toJSON . show . url) x
+                              , "listenUrl" .= (toJSON . concat) ["http://", pack host', ":", toBs port', (fromRid . rid) x]
                               , "type" .= toJSON tproxy
                               ]
                        where
@@ -197,7 +197,7 @@ instance ToJSON Radio where
     toJSON x@Local{} = object
       [ "id" .= (toJSON . rid) x
       , "playlist" .= (toJSON . playlist) x
-      , "listenUrl" .= (toJSON . concat) ["http://", pack host', ":", toBs port', "/", (fromRid . rid) x]
+      , "listenUrl" .= (toJSON . concat) ["http://", pack host', ":", toBs port', (fromRid . rid) x]
       , "type" .= toJSON tlocal
       ]
                        where
@@ -209,9 +209,14 @@ instance ToJSON Radio where
     toJSON _ = undefined
 
 instance FromJSON Radio where
-    parseJSON (Object x) =  Proxy <$> toRid (x .: "id") <*> x .: "url" <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> (pure $ return 0)
+    parseJSON (Object x) =  Proxy <$> toRid (x .: "id") <*> toUrl x <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> (pure $ return 0)
                         <|> Local <$> toRid (x .: "id") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> pN <*> (pure $ return 0)
         where toRid y = addSlash . RadioId <$> y
+              toUrl y = do
+                  z <- y .: "url"
+                  case (parseURI z) of
+                             Just w -> pure w
+                             Nothing -> mzero
               pN = pure Nothing
               pD = pure defStatus
               pL = pure []
