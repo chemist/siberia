@@ -247,6 +247,10 @@ outputStreamFromBuffer buf' = makeOutputStream f
    f (Just x) = update x buf'
 {-# INLINE outputStreamFromBuffer #-}
 
+portM :: String -> String
+portM "" = "80"
+portM x = tail x
+
 -- | create stream
 agent :: Radio -> Application (InputStream ByteString)
 agent radio = agent' =<< (getD radio :: Application Radio)
@@ -275,7 +279,7 @@ agent radio = agent' =<< (getD radio :: Application Radio)
         openConnection :: Radio -> Application (InputStream ByteString, OutputStream ByteString)
         openConnection radio = do
             let host = uriRegName <$> (uriAuthority $ url radio)
-                port = tail . uriPort <$> (uriAuthority $ url radio)
+                port = portM . uriPort <$> (uriAuthority $ url radio)
             say $ show host
             say $ show port
             is <- liftIO $ getAddrInfo (Just hints) host port
