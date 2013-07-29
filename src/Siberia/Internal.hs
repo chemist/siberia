@@ -33,6 +33,7 @@ import qualified Data.ByteString.Lazy                     as LS
 import           Data.IORef
 import           Data.Maybe                               (fromJust)
 import           Network.Socket
+import Network.URI
 import           System.IO.Streams                        as S
 import           System.IO.Streams.Attoparsec             as S
 import           System.IO.Streams.Concurrent             as S
@@ -255,11 +256,10 @@ agent radio = agent' =<< (getD radio :: Application Radio)
   agent' radio@Proxy{} = do
       say "make proxy stream"
       (i, o) <- openConnection radio
-      let Url url' = url radio
-      let Right path = parseOnly parsePath url'
+      let path = C.pack . uriPath . url $ radio
           req = "GET " <> path <> " HTTP/1.0\r\nicy-metadata: 1\r\n\r\n"
       say "url from radio"
-      say $ show url'
+      say $ show $ url radio
       say "request to server"
       say $ show req
       requestStream <- liftIO $ S.fromByteString req
@@ -274,13 +274,11 @@ agent radio = agent' =<< (getD radio :: Application Radio)
         -- | открываем соединение до стрим сервера
         openConnection :: Radio -> Application (InputStream ByteString, OutputStream ByteString)
         openConnection radio = do
-            let Url url' = url radio
-            let Right (hb, pb) = parseOnly parseUrl url'
-                h = C.unpack hb
-                p = C.unpack pb
-            say $ show h
-            say $ show p
-            is <- liftIO $ getAddrInfo (Just hints) (Just h) (Just p)
+            let host = uriRegName <$> (uriAuthority $ url radio)
+                port = tail . uriPort <$> (uriAuthority $ url radio)
+            say $ show host
+            say $ show port
+            is <- liftIO $ getAddrInfo (Just hints) host port
             let addr = head is
             let a = addrAddress addr
             s <- liftIO $  socket (addrFamily addr) Stream defaultProtocol
@@ -300,12 +298,18 @@ agent radio = agent' =<< (getD radio :: Application Radio)
         getNextSong :: Application (Maybe FilePath)
         getNextSong = do
             playList' <- getD radio :: Application (Maybe Playlist)
-            let sfile = spath . getValue <$> playList'
+            let file = uri . getValue <$> playList'
                 newPlayList = goRight <$> playList'
-                RadioId channelDir = rid radio
+                RadioId chDir = rid radio
             setD radio newPlayList
+            case uriScheme <$> file of
+                 Just "file:" -> localFile chDir  $ fromJust file 
+                 Just "http:" -> remoteFile chDir $ fromJust file 
+                 _ -> return Nothing
+        remoteFile = error "remoteFile not implemented"
+        localFile channelDir file = do
             dataDir <- liftIO getDataDir
-            return $ (<$>) concat $ sequence [pure dataDir, pure musicDirectory, pure (tail $ C.unpack channelDir), pure "/", sfile]
+            return $ Just $ concat $ [dataDir, musicDirectory, (tail $ C.unpack channelDir), uriPath file]
         f:: Store -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
         f reader channelIO = do
             maybeCh <- readIORef channelIO
@@ -470,7 +474,7 @@ instance Allowed m => Detalization m Radio where
     getD radio = info radio >>= liftIO . (flip withMVar return)
     setD = undefined
 
-instance Allowed m => Detalization m Url where
+instance Allowed m => Detalization m URI where
     getD radio = info radio >>= liftIO . getter url
     setD radio a = info radio >>= liftIO . setter (\y -> y { url = a })
 

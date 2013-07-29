@@ -35,6 +35,7 @@ import           Snap.Core               (Snap)
 import           Data.Attoparsec.RFC2616      (Request (..), request)
 import System.IO.Streams (InputStream)
 import           Blaze.ByteString.Builder                 (Builder)
+import Network.URI
 
 -- | const paths
 tempDir, musicDirectory, logFile :: FilePath
@@ -47,7 +48,6 @@ limitSizeForUpload :: Int64
 limitSizeForUpload = 10000000
 
 newtype RadioId = RadioId ByteString deriving (Show, Ord, Eq)
-newtype Url = Url ByteString deriving (Show, Ord, Eq)
 newtype Meta = Meta (ByteString, Int) deriving (Show, Ord, Eq)
 
 type Headers = [Header]
@@ -84,7 +84,7 @@ defStatus = Status 0 Nothing Nothing Nothing []
 
 data Radio = Proxy
   { rid      :: !RadioId
-  , url      :: !Url
+  , url      :: !URI
   , pid      :: !Status
   , headers  :: !Headers
   , meta     :: !(Maybe Meta)
@@ -93,7 +93,7 @@ data Radio = Proxy
   , buff     :: !(Maybe (Buffer ByteString))
   , countIO  :: IO Int64
   }
-                 | Local
+            | Local
   { rid      :: !RadioId
   , pid      :: !Status
   , headers  :: !Headers
@@ -104,21 +104,22 @@ data Radio = Proxy
   , playlist :: !(Maybe Playlist)
   , countIO  :: IO Int64
   }
-                 | ById
+            | ById
   { rid :: !RadioId } 
   
 instance Eq Radio where
     x == y = rid x == rid y
     
 
-data Song = Song { sidi  :: !Int
-                 , spath :: !String
-                 } deriving (Eq, Show)
+data Song = Song 
+  { idi    :: !Int
+  , uri   :: !URI
+  } deriving (Eq, Show)
 
 type Playlist = Cycle Song
 
 instance Ord Song where
-    compare x y = compare (sidi x) (sidi y)
+    compare x y = compare (idi x) (idi y)
 
 data Store = Store (MVar (Map RadioId (MVar Radio))) !HostPort
 
@@ -208,7 +209,7 @@ instance ToJSON Radio where
     toJSON _ = undefined
 
 instance FromJSON Radio where
-    parseJSON (Object x) =  Proxy <$> toRid (x .: "id") <*> (Url <$> x .: "url") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> (pure $ return 0)
+    parseJSON (Object x) =  Proxy <$> toRid (x .: "id") <*> x .: "url" <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> (pure $ return 0)
                         <|> Local <$> toRid (x .: "id") <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> pN <*> (pure $ return 0)
         where toRid y = addSlash . RadioId <$> y
               pN = pure Nothing
@@ -220,14 +221,23 @@ instance ToJSON (Maybe Meta) where
     toJSON (Just (Meta (bs,_))) = object [ "meta" .=  (toJSON $ BS.takeWhile (/= toEnum 0) bs) ]
     toJSON Nothing = object [ "meta" .=  toJSON BS.empty ]
 
+instance ToJSON URI where
+    toJSON x = object [ "uri" .= show x ]
+    
+instance FromJSON URI where
+    parseJSON (Object x) = do
+        str <-  x .: "uri"
+        case parseURI str of
+             Nothing -> mzero
+             Just y -> return y
 
 instance ToJSON Song where
-    toJSON x = object [ "position" .= (toJSON . sidi) x
-                      , "file"     .= (toJSON . spath) x
-                      ]
+    toJSON (Song x y) = object [ "position" .= toJSON x
+                               , "file"     .= toJSON y
+                               ]
 
 instance FromJSON Song where
-    parseJSON (Object x) = Song <$> x .: "position" <*> x .: "file"
+    parseJSON (Object x) = Song <$> x .: "position" <*> x .: "uri" 
     parseJSON _ = mzero
 
 
@@ -250,19 +260,20 @@ addSlash (RadioId x) = RadioId $ concat ["/", x]
 instance ToJSON RadioId where
     toJSON (RadioId x) = toJSON $ BS.tail x
 
-instance ToJSON Url where
-    toJSON (Url x) = toJSON x
-
-instance Binary Url where
-    put (Url x) = B.put x
-    get = Url <$> B.get
-
 instance Binary RadioId where
     put (RadioId x) = B.put x
     get = RadioId <$> B.get
+    
+instance Binary URIAuth where
+    put (URIAuth x y z) = B.put x >> B.put y >> B.put z
+    get = URIAuth <$> B.get <*> B.get <*> B.get
+    
+instance Binary URI where
+    put (URI x1 x2 x3 x4 x5) = B.put x1 >> B.put x2 >> B.put x3 >> B.put x4 >> B.put x5 
+    get = URI <$> B.get <*> B.get <*> B.get <*> B.get <*> B.get
 
 instance Binary Song where
-    put (Song x y) = B.put x >> B.put y
+    put (Song x y) = B.put x >> B.put y 
     get = Song <$> B.get <*> B.get
 
 instance Binary Playlist where
@@ -283,7 +294,7 @@ instance Binary Radio where
              case t of
                   0 -> do
                       r <- B.get :: Get RadioId
-                      u <- B.get :: Get Url
+                      u <- B.get :: Get URI
                       return $ Proxy r u defStatus [] Nothing Nothing Nothing Nothing (return 0)
                   1 -> do
                       r <- B.get

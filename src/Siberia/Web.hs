@@ -35,6 +35,7 @@ import qualified Network.Http.Client as H
 import qualified System.IO.Streams as S
 import OpenSSL (withOpenSSL)
 import Network.HTTP.Base (urlEncode)
+import Network.URI
 
 
 web :: Web ()
@@ -161,11 +162,12 @@ postSongAdd = do
                     dataDir <- liftIO getDataDir
                     liftIO $ renameFile path $ dataDir <> musicDirectory <> channelFolder <> "/" <> filename
                     pl <- getD (toById (pack channelFolder)) :: Web (Maybe Playlist)
+                    let uri = nullURI { uriScheme = "file:", uriPath = filename }
                     case pl :: Maybe Playlist of
-                         Nothing -> setD (toById (pack channelFolder)) $ Just (Collections.singleton $ Song 0 filename :: Playlist)
+                         Nothing -> setD (toById (pack channelFolder)) $ Just (Collections.singleton $ Song 0 uri :: Playlist)
                          Just pl' -> do
                              let Song n _ = Collections.maximum pl'
-                             setD (toById (pack channelFolder)) $ Just $ Collections.insert (Song (n + 1) filename) pl'
+                             setD (toById (pack channelFolder)) $ Just $ Collections.insert (Song (n + 1) uri) pl'
 
 -- | delete song from playlist
 -- dont remove file from filesystem
@@ -180,7 +182,7 @@ deleteSong = do
              unless isInBase $ errorWWW 403
              case reads $ unpack n of
                   [] -> errorWWW 400
-                  [(n', _)] -> rmSong (Song n' "") i
+                  [(n', _)] -> rmSong (Song n' nullURI) i
                   _ -> errorWWW 400
          _ -> errorWWW 400
     where
@@ -216,7 +218,7 @@ changePlaylist = do
 
 
 removeSongFromPlaylist :: Song -> Playlist -> Playlist
-removeSongFromPlaylist s p = let list = Collections.filter (\(Song x _) -> x /= sidi s) p
+removeSongFromPlaylist s p = let list = Collections.filter (\(Song x _) -> x /= idi s) p
                                  sortedPair = zip (sort $ Collections.toList list) [0 .. ]
                              in Collections.fromAscList $ map (\(Song _ x, y) -> Song y x) sortedPair
 
