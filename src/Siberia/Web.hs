@@ -169,10 +169,10 @@ postSongAdd = do
                     pl <- getD (toById (pack channelFolder)) :: Web (Maybe Playlist)
                     let uri = nullURI { uriScheme = "file:", uriPath = filename }
                     case pl :: Maybe Playlist of
-                         Nothing -> setD (toById (pack channelFolder)) $ Just (Collections.singleton $ Song 0 uri :: Playlist)
+                         Nothing -> setD (toById (pack channelFolder)) $ Just (Collections.singleton $ Song 0 uri Nothing Nothing Nothing :: Playlist)
                          Just pl' -> do
-                             let Song n _ = Collections.maximum pl'
-                             setD (toById (pack channelFolder)) $ Just $ Collections.insert (Song (n + 1) uri) pl'
+                             let Song n _ _ _ _ = Collections.maximum pl'
+                             setD (toById (pack channelFolder)) $ Just $ Collections.insert (Song (n + 1) uri Nothing Nothing Nothing) pl'
 
 -- | delete song from playlist
 -- dont remove file from filesystem
@@ -187,7 +187,7 @@ deleteSong = do
              unless isInBase $ errorWWW 403
              case reads $ unpack n of
                   [] -> errorWWW 400
-                  [(n', _)] -> rmSong (Song n' nullURI) i
+                  [(n', _)] -> rmSong (Song n' nullURI Nothing Nothing Nothing ) i
                   _ -> errorWWW 400
          _ -> errorWWW 400
     where
@@ -223,16 +223,17 @@ changePlaylist = do
 
 
 removeSongFromPlaylist :: Song -> Playlist -> Playlist
-removeSongFromPlaylist s p = let list = Collections.filter (\(Song x _) -> x /= idi s) p
+removeSongFromPlaylist s p = let list = Collections.filter (\(Song x _ _ _ _) -> x /= idi s) p
                                  sortedPair = zip (sort $ Collections.toList list) [0 .. ]
-                             in Collections.fromAscList $ map (\(Song _ x, y) -> Song y x) sortedPair
+                             in Collections.fromAscList $ map (\(Song _ x a b c, y) -> Song y x a b c) sortedPair
 
 
 moveSongInPlaylist :: Song -> Playlist -> Playlist
-moveSongInPlaylist s@(Song position filename) p = let list = sort $ Collections.toList $ Collections.filter (\(Song _ f) -> f /= filename) p
-                                                      h = take position list
-                                                      t = drop position list
-                                                  in Collections.fromAscList $ map (\(Song _ x, y) -> Song y x) $ zip (h ++ [s] ++ t) [0 .. ]
+moveSongInPlaylist s@(Song position filename _ _ _) p = 
+  let list = sort $ Collections.toList $ Collections.filter (\(Song _ f _ _ _) -> f /= filename) p
+      h = take position list
+      t = drop position list
+  in Collections.fromAscList $ map (\(Song _ x a b c, y) -> Song y x a b c) $ zip (h ++ [s] ++ t) [0 .. ]
 
 toById :: ByteString -> Radio
 toById x = ById . RadioId $ "/" <> x

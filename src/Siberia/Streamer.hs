@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
 module Siberia.Streamer where
 
 import           Control.Applicative
@@ -14,6 +16,12 @@ import Data.IORef
 import Control.Concurrent
 import Data.Maybe
 import Control.Monad
+import Data.Aeson
+import qualified Data.Aeson.Generic as G
+import Data.Typeable 
+import Data.Data
+import Data.Binary
+import GHC.Generics
 
 
 data Audio = Audio
@@ -31,7 +39,11 @@ data ATag = ATag
   , title   :: String
   , track   :: Int
   , year    :: Int
-  } deriving (Show)
+  } deriving (Eq, Show, Data, Typeable, Generic)
+  
+instance ToJSON ATag 
+instance FromJSON ATag 
+instance Binary ATag
 
 getAudio :: String -> IO (Maybe Audio, Maybe ATag)
 getAudio filename = do

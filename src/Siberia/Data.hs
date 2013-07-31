@@ -4,6 +4,8 @@
 {-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE TypeSynonymInstances   #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Siberia.Data where
 
@@ -36,6 +38,7 @@ import           Data.Attoparsec.RFC2616      (Request (..), request)
 import System.IO.Streams (InputStream)
 import           Blaze.ByteString.Builder                 (Builder)
 import Network.URI
+import Siberia.Streamer 
 
 -- | const paths
 tempDir, musicDirectory, logFile :: FilePath
@@ -114,6 +117,9 @@ instance Eq Radio where
 data Song = Song 
   { idi    :: !Int
   , uri   :: !URI
+  , fileSize  :: !(Maybe Int)
+  , time  :: !(Maybe Int)
+  , tags  :: !(Maybe ATag)
   } deriving (Eq, Show)
 
 type Playlist = Cycle Song
@@ -237,12 +243,16 @@ instance FromJSON URI where
              Just y -> return y
 
 instance ToJSON Song where
-    toJSON (Song x y) = object [ "position" .= toJSON x
-                               , "file"     .= toJSON y
-                               ]
+    toJSON (Song x y w z e) = 
+      object [ "position" .= toJSON x
+             , "file"     .= toJSON y
+             , "size"     .= toJSON w
+             , "time"     .= toJSON z
+             , "tags"     .= toJSON e
+             ]
 
 instance FromJSON Song where
-    parseJSON (Object x) = Song <$> x .: "position" <*> x .: "uri" 
+    parseJSON (Object x) = Song <$> x .: "position" <*> x .: "uri" <*> pure Nothing <*> pure Nothing <*> pure Nothing
     parseJSON _ = mzero
 
 
@@ -278,8 +288,8 @@ instance Binary URI where
     get = URI <$> B.get <*> B.get <*> B.get <*> B.get <*> B.get
 
 instance Binary Song where
-    put (Song x y) = B.put x >> B.put y 
-    get = Song <$> B.get <*> B.get
+    put (Song x y w z e) = B.put x >> B.put y >> B.put w >> B.put z >> B.put e
+    get = Song <$> B.get <*> B.get <*> B.get <*> B.get <*> B.get
 
 instance Binary Playlist where
     put  = B.put . Collections.toList
