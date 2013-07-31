@@ -1,79 +1,116 @@
 <!doctype html>
 <head>
-  <link type="text/css" href="/static/js/jplayer/jplayer.blue.monday.css" rel="stylesheet"/>
+  <link type="text/css" href="/static/js/jplayer/jPlayer.css" rel="stylesheet" />
   <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.6/jquery.min.js"></script>
   <!-- <script src="/static/js/zepto.min.js"></script> -->
   <script src="/static/js/jplayer/jquery.jplayer.min.js"></script>
   <script type="text/javascript">
     var stream = "http://" + document.location.hostname + ":2000/3578";
     $(document).ready(function(){
-       $("#jquery_jplayer_1").jPlayer({
-         ready: function () {
-           $(this).jPlayer("setMedia", {
-             m4a: stream
-           });
-         },
-         swfPath: "/js",
-         supplied: "m4a"
-       });
+            var my_JPlayer = $("#jquery_jplayer");
+            var opt_play_first = false,
+                opt_auto_play = true;
+            my_JPlayer.jPlayer({
+                  ready: function() {
+                    $("#jp_container .track-default").click();
+                    },
+                  cssSelectorAncestor: "#jp_container",
+                  supplied: "mp3",
+                  wmode: "window"
+            });
+            $("#jp_container .track").click(function(e) {
+                my_JPlayer.jPlayer("setMedia", {
+                    mp3: $(this).attr("href")
+                    });
+                $(this).blur();
+                var name = $(this).html();
+                $(".track-name").html(name);
+                
+                return false;
+            });
     });
   </script>
+  <style>
+    <!--
+
+      .demo-container {
+            border: 1px solid #009BE3;
+            padding:0 20px;
+            font-family: "Myriad Pro Regular","Trebuchet MS";
+       }
+
+       .demo-container a, .demo-container a:link, .demo-container a:visited, .demo-container a:hover, .demo-container a:focus, .demo-container a:active {
+            color: #009BE3;
+       }
+
+       .demo-container ul {
+            list-style-type:none;
+            padding:0;
+            margin:1em 0;
+            width:100%;
+            overflow:hidden;
+       }
+
+       .demo-container ul span {
+            color: #A0A600;
+       }
+
+       .demo-container li {
+            float:left;
+            margin-right:1em;
+       }
+
+       .demo-container p span.track-name {
+            color: #CC0090;
+       }
+
+       -->
+  </style>
 </head>
 <body>
-  <div id="jquery_jplayer_1" class="jp-jplayer"></div>
-  <div id="jp_container_1" class="jp-audio">
-    <div class="jp-type-single">
-      <div class="jp-gui jp-interface">
-        <ul class="jp-controls">
-          <li>
-            <a href="javascript:;" class="jp-play" tabindex="1">play</a>
-          </li>
-          <li>
-            <a href="javascript:;" class="jp-pause" tabindex="1">pause</a>
-          </li>
-          <li>
-            <a href="javascript:;" class="jp-stop" tabindex="1">stop</a>
-          </li>
-          <li>
-            <a href="javascript:;" class="jp-mute" tabindex="1" title="mute">mute</a>
-          </li>
-          <li>
-            <a href="javascript:;" class="jp-unmute" tabindex="1" title="unmute">unmute</a>
-          </li>
-          <li>
-            <a href="javascript:;" class="jp-volume-max" tabindex="1" title="max volume">max volume</a>
-          </li>
-        </ul>
-        <div class="jp-progress">
-          <div class="jp-seek-bar">
-            <div class="jp-play-bar"></div>
-          </div>
-        </div>
-        <div class="jp-volume-bar">
-          <div class="jp-volume-bar-value"></div>
-        </div>
-        <div class="jp-time-holder">
-          <div class="jp-current-time"></div>
-          <div class="jp-duration"></div>
-          <ul class="jp-toggles">
-            <li>
-              <a href="javascript:;" class="jp-repeat" tabindex="1" title="repeat">repeat</a>
-            </li>
-            <li>
-              <a href="javascript:;" class="jp-repeat-off" tabindex="1" title="repeat off">repeat off</a>
-            </li>
-          </ul>
-        </div>
-      </div>
-      <div class="jp-title">
-        <ul>
-          <li>Bubble</li>
-        </ul>
-      </div>
-      <div class="jp-no-solution">
-        <span>Update Required</span>To play the media you will need to either update your browser
-        to a recent version or update your
-        <a href="http://get.adobe.com/flashplayer/" target="_blank">Flash plugin</a>.</div>
-    </div>
+  <div id="jquery_jplayer"></div>
+  <!-- Using the cssSelectorAncestor option with the default cssSelector class
+  names to enable control association of standard functions using built in features
+  -->
+  <div id="jp_container" class="demo-container">
+    <p>
+      <span class="play-state"></span>:
+      <span class="track-name">nothing</span> 
+    </p>
+    <ul>
+      <li>
+        <a class="jp-play" href="#">Play</a>
+      </li>
+      <li>
+        <a class="jp-pause" href="#">Pause</a>
+      </li>
+      <li>
+        <a class="jp-stop" href="#">Stop</a>
+      </li>
+    </ul>
+    <ul>
+      <li>
+        <span>Select a track :</span>
+      </li>
+      <li>
+        <a href="http://192.168.1.46:2000/3578" class="track track-default">3578</a>
+      </li>
+      <li>|</li>
+      <li>
+        <a href="http://192.168.1.46:2000/3614" class="track">3614</a>
+      </li>
+      <li>|</li>
+      <li>
+        <a href="http://192.168.1.46:2000/3639" class="track">3639</a>
+      </li>
+      <li>|</li>
+      <li>
+        <a href="http://192.168.1.46:2000/3700" class="track">3700</a>
+      </li>
+      <li>|</li>
+      <li>
+        <a href="http://192.168.1.46:2000/3791" class="track">3791</a>
+      </li>
+    </ul>
   </div>
 </body>

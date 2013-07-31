@@ -1,0 +1,2 @@
+#!/bin/bash
+echo ":ctags" | ghci -v0 src/Siberia.hs

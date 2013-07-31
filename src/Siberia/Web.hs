@@ -40,24 +40,25 @@ import Network.URI
 
 web :: Web ()
 web =  liftIO getDataDir >>= \dataDir -> ifTop (serveFile $ dataDir <> "/static/index.html")
-       <|> method GET ( routeLocal [ ("server/stats", statsHandler )
-                                   , ("play", (serveFile $ dataDir <> "/static/pl.html"))
-                                   , ("stream", getStreamHandler )
-                                   , ("stream/:sid", streamHandlerById )
-                                   , ("stream/:sid/metadata", streamMetaHandler )
-                                   , ("stream/:sid/stats", streamStatsHandler )
-                                   , ("playlist/:sid",         getPlaylist)
-                                   , ("save", saveHandler)
-                                   , ("ya/:sid" , yandexHandler)
-                                   , ("verification_code", yandexOauth)
-                                   ] )
-       <|> method POST ( routeLocal [ ("stream/:sid", postStreamHandler )
-                               , ("playlist/:sid", changePlaylist)
-                               , ("audio/:sid"  , postSongAdd)
-                               ] )
+       <|> method GET    ( routeLocal [ ("server/stats", statsHandler )
+                                      , ("play", (serveFile $ dataDir <> "/static/pl.html"))
+                                      , ("stream", getStreamHandler )
+                                      , ("stream/:sid", streamHandlerById )
+                                      , ("stream/:sid/metadata", streamMetaHandler )
+                                      , ("stream/:sid/stats", streamStatsHandler )
+                                      , ("playlist/:sid",         getPlaylist)
+                                      , ("save", saveHandler)
+                                      , ("ya/:sid" , yandexHandler)
+                                      , ("verification_code", yandexOauth)
+                                      ] )
+       <|> method POST   ( routeLocal [ ("stream/:sid", postStreamHandler )
+                                      , ("playlist/:sid", changePlaylist)
+                                      , ("audio/:sid"  , postSongAdd)
+                                      , ("audio/link/:sid" , postLinkSongAdd)
+                                      ] )
        <|> method DELETE ( routeLocal [ ("stream/:sid", deleteStreamHandler )
-                                 , ("audio/:sid/:fid" , deleteSong)
-                                 ] )
+                                      , ("audio/:sid/:fid" , deleteSong)
+                                      ] )
        <|> dir "static" (serveDirectory (dataDir <> "/static"))
 
 yandexHandler :: Web ()
@@ -128,6 +129,9 @@ getPlaylist = do
           list <- getD (toById i) :: Web (Maybe Playlist)
           maybe (errorWWW 412) (writeLBS . encode) list
 
+-- add downloader here, afther add link
+postLinkSongAdd :: Web ()
+postLinkSongAdd = undefined
 
 uploadPolicy :: UploadPolicy
 uploadPolicy = setMaximumFormInputSize limitSizeForUpload defaultUploadPolicy

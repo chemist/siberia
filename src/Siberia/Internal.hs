@@ -177,7 +177,7 @@ connectWithRemoveMetaAndBuffering ::Maybe Int                -- ^meta int
                                   -> IO (ThreadId, ThreadId)  -- ^return pids
 connectWithRemoveMetaAndBuffering Nothing _ buffSize is os = do
     builder <- S.builderStreamWith (allNewBuffersStrategy buffSize) os
-    ps <- S.parserToInputStream (toBuilder defChunk) is
+    ps <- S.parserToInputStream (toBuilder bUFSIZ) is
     x <- forkIO $ S.connect ps builder
     return (x,x)
 
@@ -301,36 +301,49 @@ agent radio = agent' =<< (getD radio :: Application Radio)
       where
         getNextSong :: Application (Maybe FilePath)
         getNextSong = do
-            playList' <- getD radio :: Application (Maybe Playlist)
-            let file = uri . getValue <$> playList'
-                newPlayList = goRight <$> playList'
-                RadioId chDir = rid radio
-            setD radio newPlayList
+            playlist <- getD radio :: Application (Maybe Playlist)
+            let file = uri . getValue <$> playlist
+                RadioId channelDir = rid radio
             case uriScheme <$> file of
-                 Just "file:" -> localFile chDir  $ fromJust file 
-                 Just "http:" -> remoteFile chDir $ fromJust file 
-                 _ -> return Nothing
-        remoteFile = error "remoteFile not implemented"
-        localFile channelDir file = do
+               Just "file:" -> checkFile (fromJust playlist) =<< localFile channelDir (uriPath . fromJust $ file) 
+               Just "http:" -> checkFile (fromJust playlist) =<< localFile channelDir (uriToFileName . fromJust $ file) 
+               _ -> return Nothing
+               
+        checkFile ::Playlist -> FilePath -> Application (Maybe FilePath)
+        checkFile playlist file = maybe (bad playlist) (ok playlist file) =<< fst <$> (liftIO $ getAudio file)
+        
+        ok playlist file _ = do
+            setD radio (Just $ goRight playlist)
+            return $ Just file
+            
+        bad playlist = do
+            let newPlaylist = Collections.tail playlist
+            if Collections.null newPlaylist
+               then return Nothing
+               else do
+                   setD radio (Just newPlaylist)
+                   getNextSong
+
+        localFile :: ByteString -> String -> Application String
+        localFile channelDir fileName = do
             dataDir <- liftIO getDataDir
-            return $ Just $ concat $ [dataDir, musicDirectory, (tail $ C.unpack channelDir), uriPath file]
+            return $ concat $ [dataDir, musicDirectory, (tail $ C.unpack channelDir), fileName]
+            
         f:: Store -> IORef (Maybe (InputStream BS.ByteString)) -> IO (Maybe BS.ByteString)
         f reader channelIO = do
             maybeCh <- readIORef channelIO
-            case maybeCh of
-                 Nothing -> do
-                     file <- runReaderT getNextSong reader
-                     case file of
-                          Nothing -> do
-                              say "empty playlist"
-                              return Nothing
-                          Just file' -> do
-                              say $ show file
-                            --  channel <-  runFFmpeg file'
-                              channel <- ratedStream file'
-                              writeIORef channelIO $ Just channel
-                              f reader channelIO
-                 Just ch -> do
+            file <- runReaderT getNextSong reader
+            case (maybeCh, file) of
+                 (Nothing, Nothing) -> do
+                     say "empty playlist"
+                     return Nothing
+                 (Nothing, Just file') -> do
+                     say $ show file
+                     --  channel <-  runFFmpeg file'
+                     channel <- ratedStream file'
+                     writeIORef channelIO $ Just channel
+                     f reader channelIO
+                 (Just ch, _) -> do
                      !chunk <- S.read ch
                      case chunk of
                           Just c -> return $! Just c
@@ -338,8 +351,12 @@ agent radio = agent' =<< (getD radio :: Application Radio)
                               writeIORef channelIO Nothing
                               f reader channelIO
 
--- buffer size
-defChunk = 32768
+uriToFileName :: URI -> String
+uriToFileName uri = let regName = uriRegName . fromJust $ uriAuthority uri
+                        pathName = uriPath uri
+                        fullName = regName ++ pathName
+                    in Prelude.show $ hash fullName
+                    
 kill :: MProcess -> IO ()
 kill (Just x) = killThread x
 kill Nothing = return ()
@@ -421,7 +438,7 @@ instance Allowed m => Storable m Radio where
         let withPort = addHostPort hp r
         is <- member r
         if is
-           then return (False, undefined)
+           then return (False, error "Internal.create: Nothing here")
            else do
                mv <- liftIO $ newMVar withPort
                liftIO $ modifyMVar_ x $ \mi -> return $ Map.insert (rid r) mv mi
@@ -461,7 +478,7 @@ instance Allowed m => Storable m Radio where
         r <- liftIO $ withMVar x $ \y -> return $ Map.lookup (rid a) y
         case r of
              Just x -> return x
-             Nothing -> undefined
+             Nothing -> error "Internal.info Its imposible."
     --  @TODO catch exception
 
 addHostPort::HostPort -> Radio -> Radio
@@ -476,7 +493,7 @@ setter x  =  flip modifyMVar_ (return . x)
 
 instance Allowed m => Detalization m Radio where
     getD radio = info radio >>= liftIO . (flip withMVar return)
-    setD = undefined
+    setD = error "Internal.setD: Its imposible"
 
 instance Allowed m => Detalization m URI where
     getD radio = info radio >>= liftIO . getter url

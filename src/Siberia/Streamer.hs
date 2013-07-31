@@ -66,7 +66,7 @@ ratedStream :: String -> IO (S.InputStream ByteString)
 ratedStream fn = do
     properties <- getAudio fn
     case properties of
-         (Just audio, Just tag) -> ratedStream' (duration audio) (bitRate audio) fn
+         (Just audio, _) -> ratedStream' (duration audio) (bitRate audio) fn
          _ -> S.nullInput
     where
     ratedStream' :: Int -> Int -> String -> IO (S.InputStream ByteString)
@@ -105,5 +105,4 @@ handleToInputStream songTime rate h = do
               pause s
           return ()
       
-bUFSIZ = 32752
-
+bUFSIZ = 32768
