@@ -36,11 +36,14 @@ import qualified System.IO.Streams as S
 import OpenSSL (withOpenSSL)
 import Network.HTTP.Base (urlEncode)
 import Network.URI
+import Siberia.Template
+import Text.Blaze.Renderer.Text
 
 
 web :: Web ()
-web =  liftIO getDataDir >>= \dataDir -> ifTop (serveFile $ dataDir <> "/static/index.html")
-       <|> method GET    ( routeLocal [ ("server/stats", statsHandler )
+web =  liftIO getDataDir >>= \dataDir -> ifTop (SC.writeLazyText $ renderHtml $ index HomePage)
+       <|> method GET    ( routeLocal [ ("streams" , renderStreams)
+                                      , ("server/stats", statsHandler )
                                       , ("play", (serveFile $ dataDir <> "/static/pl.html"))
                                       , ("stream", getStreamHandler )
                                       , ("stream/:sid", streamHandlerById )
@@ -102,6 +105,11 @@ getStreamHandler :: Web ()
 getStreamHandler = do
         s <- list :: Web [Radio]
         writeLBS $ encode s
+        
+renderStreams :: Web ()
+renderStreams = do
+    s <- list :: Web [Radio]
+    SC.writeLazyText $ renderHtml $ index $ StreamsPage s
 
 postStreamHandler::Web ()
 postStreamHandler = do

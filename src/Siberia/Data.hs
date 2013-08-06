@@ -46,6 +46,12 @@ tempDir = "/.music/"
 musicDirectory = "/music/"
 logFile = "/log/siberia.log"
 
+data Site = HomePage
+          | StreamsPage [Radio]
+          | StatusPage
+          | SavePage
+          deriving (Show, Eq)
+          
 -- | const max size for uploaded files
 limitSizeForUpload :: Int64
 limitSizeForUpload = 10000000
