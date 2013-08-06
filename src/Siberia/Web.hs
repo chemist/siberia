@@ -37,33 +37,45 @@ import OpenSSL (withOpenSSL)
 import Network.HTTP.Base (urlEncode)
 import Network.URI
 import Siberia.Template
-import Text.Blaze.Renderer.Text
+import Text.Blaze.Html.Renderer.Utf8
 
 
 web :: Web ()
-web =  liftIO getDataDir >>= \dataDir -> ifTop (SC.writeLazyText $ renderHtml $ index HomePage)
-       <|> method GET    ( routeLocal [ ("streams" , renderStreams)
-                                      , ("server/stats", statsHandler )
-                                      , ("play", (serveFile $ dataDir <> "/static/pl.html"))
-                                      , ("stream", getStreamHandler )
-                                      , ("stream/:sid", streamHandlerById )
-                                      , ("stream/:sid/metadata", streamMetaHandler )
-                                      , ("stream/:sid/stats", streamStatsHandler )
-                                      , ("playlist/:sid",         getPlaylist)
-                                      , ("save", saveHandler)
-                                      , ("ya/:sid" , yandexHandler)
-                                      , ("verification_code", yandexOauth)
-                                      ] )
-       <|> method POST   ( routeLocal [ ("stream/:sid", postStreamHandler )
-                                      , ("playlist/:sid", changePlaylist)
-                                      , ("audio/:sid"  , postSongAdd)
-                                      , ("audio/link/:sid" , postLinkSongAdd)
-                                      ] )
-       <|> method DELETE ( routeLocal [ ("stream/:sid", deleteStreamHandler )
-                                      , ("audio/:sid/:fid" , deleteSong)
-                                      ] )
-       <|> dir "static" (serveDirectory (dataDir <> "/static"))
+web =  liftIO getDataDir >>= \dataDir -> ifTop (SC.writeLBS $ renderHtml $ index HomePage)
+    <|> api
+    <|> simpleHtml
+    <|> dir "static" (serveDirectory (dataDir <> "/static"))
+       
+api :: Web () 
+api = method GET    ( routeLocal [ ("api/server/stats", statsHandler )
+                                 , ("api/stream", getStreamHandler )
+                                 , ("api/stream/:sid", streamHandlerById )
+                                 , ("api/stream/:sid/metadata", streamMetaHandler )
+                                 , ("api/stream/:sid/stats", streamStatsHandler )
+                                 , ("api/playlist/:sid",         getPlaylist)
+                                 , ("api/save", saveHandler)
+                                 , ("api/ya/:sid" , yandexHandler)
+                                 , ("api/verification_code", yandexOauth)
+                                 ] )
+  <|> method POST   ( routeLocal [ ("api/stream/:sid", postStreamHandler )
+                                 , ("api/playlist/:sid", changePlaylist)
+                                 , ("api/audio/:sid"  , postSongAdd)
+                                 , ("api/audio/link/:sid" , postLinkSongAdd)
+                                 ] )
+  <|> method DELETE ( routeLocal [ ("api/stream/:sid", deleteStreamHandler )
+                                 , ("api/audio/:sid/:fid" , deleteSong)
+                                 ] )
 
+simpleHtml :: Web ()
+simpleHtml = method GET (routeLocal [ ( "stream", renderStreams) ])
+
+------------------------------------- simple html --------------------------------------------------------
+
+renderStreams :: Web ()
+renderStreams = do
+    s <- list :: Web [Radio]
+    SC.writeLBS $ renderHtml $ index $ StreamsPage s
+    
 yandexHandler :: Web ()
 yandexHandler = do
     sid <- getParam "sid"
@@ -106,10 +118,6 @@ getStreamHandler = do
         s <- list :: Web [Radio]
         writeLBS $ encode s
         
-renderStreams :: Web ()
-renderStreams = do
-    s <- list :: Web [Radio]
-    SC.writeLazyText $ renderHtml $ index $ StreamsPage s
 
 postStreamHandler::Web ()
 postStreamHandler = do

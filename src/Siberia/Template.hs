@@ -8,6 +8,7 @@ import qualified Text.Blaze.Html5.Attributes as A
 import Text.Blaze.Renderer.Pretty
 import Control.Monad
 import Siberia.Data
+import Data.ByteString.Char8 (unpack)
 
 
 index :: Site -> Html
@@ -29,19 +30,42 @@ navbar = do
                 H.ul ! A.class_ "nav" $ do
                     H.li $ a ! href "/" $ "Home"
                     H.li $ a ! href "/status" $ "Status"
-                    H.li $ a ! href "/streams" $ "All streams"
-                    H.li $ a ! href "/saves" $ "Save all"
+                    H.li $ a ! href "/stream" $ "All streams"
+                    H.li $ a ! href "/save" $ "Save all"
                 
 
+bodyPage :: Site -> Html
 bodyPage HomePage = do
     p "home page"
 bodyPage (StreamsPage x) = do
     H.div ! A.class_ "streams" $ do
-        H.table ! A.class_ "table table-striped" $ do
-            H.tbody $ forM_ x radioToHtml
+        H.h5 "Stream from local files"
+        H.div ! A.class_ "local" $ do
+            H.table ! A.class_ "table table-striped" $ do
+                H.tbody $ forM_ (filter onlyLocal x) radioToHtml
+        H.h5 "Proxy stream"
+        H.div ! A.class_ "proxy" $ do
+            H.table ! A.class_ "table table-striped" $ do
+                H.tbody $ forM_ (filter onlyProxy x) radioToHtml
     where
+    onlyLocal Local{} = True
+    onlyLocal _ = False
+    onlyProxy Proxy{} = True
+    onlyProxy _ = False
+    localUrl y = concat ["http://", host' y, ":", port' y, unpack $ unpackRid $ rid y]
+    host' y = let Just (h,_) = hostPort y
+              in h
+    port' y = let Just (_,p) = hostPort y
+              in show p
     radioToHtml :: Radio -> Html
-    radioToHtml y = do
+    radioToHtml y@Proxy{} = do
+        H.tr $ do
+            H.td $ H.unsafeByteString $ unpackRid $ rid y
+            H.td $ H.toHtml $ show $ url y
+            H.td $ do
+                a ! href (H.toValue $ localUrl y) $ H.unsafeByteString $ unpackRid $ rid y
+            H.td $ H.toHtml $ show $ connections $ pid y
+    radioToHtml y@Local{} = do
         H.tr $ do
             H.td $ H.unsafeByteString $ unpackRid $ rid y
             
