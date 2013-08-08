@@ -212,7 +212,7 @@ instance ToJSON Radio where
                          toBs  = pack . Prelude.show
                          fromRid :: RadioId -> ByteString
                          fromRid (RadioId y ) = y
-    toJSON _ = undefined
+    toJSON _ = error "toJson"
 
 instance FromJSON Radio where
     parseJSON (Object x) =  Proxy <$> toRid (x .: "id") <*> toUrl x <*> pD <*> pL <*> pN <*> pN <*> pN <*> pN <*> (pure $ return 0)
@@ -304,7 +304,7 @@ instance Binary Radio where
         B.put (1 :: Word8)
         B.put $ rid x
         B.put $ playlist x
-    put _ = undefined
+    put _ = error "Binary.Radio.put"
     get = do t <- B.get :: Get Word8
              case t of
                   0 -> do
@@ -315,6 +315,6 @@ instance Binary Radio where
                       r <- B.get
                       p <- B.get
                       return $ Local r defStatus [] Nothing Nothing Nothing Nothing p (return 0)
-                  _ -> undefined
+                  _ -> error "Binary.Radio.get"
 
 

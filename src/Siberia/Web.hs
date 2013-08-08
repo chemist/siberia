@@ -131,7 +131,7 @@ getPlaylist = do
 
 -- add downloader here, afther add link
 postLinkSongAdd :: Web ()
-postLinkSongAdd = undefined
+postLinkSongAdd = error "postLinkSongAdd"
 
 uploadPolicy :: UploadPolicy
 uploadPolicy = setMaximumFormInputSize limitSizeForUpload defaultUploadPolicy

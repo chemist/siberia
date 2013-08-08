@@ -29,6 +29,7 @@ executable siberia
   main-is: Siberia.hs             
   other-modules: Paths_siberia      
   build-depends:       base >=4.5.0, 
+                       ghc-prim,
                        mtl >=2.1.0,
                        time >=1.4.0,
                        glib >=0.12.4,
